@@ -41,6 +41,26 @@ body {
   overflow: hidden;
 }
 
+.rec-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: rgba(200, 30, 40, 0.85);
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+  animation: recpulse 1.4s ease-in-out infinite;
+}
+
+@keyframes recpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 .pip-label {
   position: absolute;
   top: 6px;
@@ -177,6 +197,33 @@ button.secondary:hover {
 .readout {
   font-size: 12px;
   line-height: 1.6;
+}
+
+.cam-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #aab3c2;
+}
+
+.cam-row select {
+  flex: 1;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0c0f15;
+  color: #e6e9ef;
+  font-size: 12px;
+}
+
+#record.recording {
+  background: #c81e28;
+}
+
+#record.recording:hover {
+  background: #e2333d;
 }
 
 .toggle {

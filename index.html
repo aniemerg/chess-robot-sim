@@ -12,6 +12,7 @@
 
       <div id="pip">
         <span class="pip-label">Wrist cam · J4</span>
+        <span class="rec-badge" id="recBadge" hidden>● REC 0:00</span>
       </div>
 
       <div id="panel">
@@ -37,6 +38,9 @@
             <button id="move">Move to target</button>
             <button id="reset" class="secondary">Reset pose</button>
           </div>
+          <div class="buttons">
+            <button id="home" class="secondary">Home (board view)</button>
+          </div>
         </section>
 
         <section>
@@ -53,6 +57,18 @@
             <label for="focal">Focal</label>
             <input id="focal" type="range" min="12" max="85" step="1" value="20" />
             <span id="focalVal" class="val">20 mm</span>
+          </div>
+          <div class="cam-row">
+            <label for="recRes">Resolution</label>
+            <select id="recRes">
+              <option value="480">480p</option>
+              <option value="720" selected>720p</option>
+              <option value="1080">1080p</option>
+            </select>
+          </div>
+          <div class="buttons">
+            <button id="record">● Record</button>
+            <button id="snapshot" class="secondary">Snapshot</button>
           </div>
         </section>
 

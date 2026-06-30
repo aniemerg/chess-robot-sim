@@ -40,6 +40,9 @@ that solving does not disturb the current pose.
 - **Target X/Y/Z** — type a coordinate (meters) and press **Move to target** to
   send the gripper there, kept vertical.
 - **Reset pose** — opens the gripper and animates back to the home pose.
+- **Home (board view)** — raises the arm over the near edge with the gripper
+  vertical and widens the wrist-cam focal length, so the wrist camera frames the
+  entire board (a good vantage before recording).
 - **Wrist camera** — the inset viewport (lower-right) is a camera mounted just
   below joint 4, looking along the remaining arm toward the gripper. It rides
   the wrist, so it shows a gripper's-eye view of the target during pick-and-place.
@@ -47,6 +50,14 @@ that solving does not disturb the current pose.
   the bottom of the frame with the board ahead, like looking down at your hand.
   The **Focal** slider (under *Wrist camera*) varies the lens focal length in
   millimeters — drag toward 85 mm to zoom in, toward 12 mm for a wide view.
+- **Record / Snapshot** — under *Wrist camera*, **Record** captures the wrist
+  view to a video file (a red ●REC badge with an elapsed timer shows on the
+  inset); pressing **Stop** downloads it. **Snapshot** saves a single still.
+  Pick the **Resolution** (480p / 720p / 1080p) before recording. Recording and
+  stills are rendered on a dedicated offscreen canvas, so the saved frame is the
+  clean wrist view at full resolution — not a crop of the on-screen inset. Files
+  download as `wristcam-<timestamp>.webm` / `.png` (WebM via `MediaRecorder`;
+  the exact codec is whatever the browser supports — Chrome/Firefox use VP9/VP8).
 - **Board editor** — toggle **Edit board** to rearrange the position by hand
   (the robot parks itself out of the way). Tools:
   - **Move** — click a piece to select it, then click a square to move it

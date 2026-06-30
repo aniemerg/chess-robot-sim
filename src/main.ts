@@ -368,6 +368,126 @@ function applyFocal(mm: number): void {
 focalEl.addEventListener("input", () => applyFocal(Number(focalEl.value)));
 applyFocal(Number(focalEl.value));
 
+// --- Wrist-cam recording + snapshot ----------------------------------------
+// A dedicated offscreen canvas + renderer captures the wrist view on its own
+// (the on-screen inset is just a scissor region of the main canvas, so it
+// can't be recorded in isolation). MediaRecorder turns its captureStream into
+// a downloadable clip; snapshots use toBlob.
+const REC_RES: Record<string, [number, number]> = {
+  "480": [640, 480],
+  "720": [960, 720],
+  "1080": [1440, 1080],
+};
+const recResEl = document.getElementById("recRes") as HTMLSelectElement;
+const recordBtn = document.getElementById("record") as HTMLButtonElement;
+const snapshotBtn = document.getElementById("snapshot") as HTMLButtonElement;
+const recBadge = document.getElementById("recBadge") as HTMLSpanElement;
+
+const recCanvas = document.createElement("canvas");
+const recRenderer = new THREE.WebGLRenderer({
+  canvas: recCanvas,
+  antialias: true,
+  preserveDrawingBuffer: true, // so toBlob/captureStream read a valid frame
+});
+recRenderer.setPixelRatio(1);
+recRenderer.shadowMap.enabled = true;
+recRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+function setRecResolution(): void {
+  const [w, h] = REC_RES[recResEl.value];
+  recRenderer.setSize(w, h, false);
+}
+setRecResolution();
+
+let mediaRecorder: MediaRecorder | null = null;
+let recChunks: Blob[] = [];
+let recStartMs = 0;
+let recording = false;
+
+function bestMime(): string {
+  const cands = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"];
+  if (!("MediaRecorder" in window)) return "";
+  return cands.find((c) => MediaRecorder.isTypeSupported(c)) ?? "";
+}
+
+function download(blob: Blob, ext: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  a.href = url;
+  a.download = `wristcam-${ts}.${ext}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function startRecording(): void {
+  if (recording) return;
+  if (!("MediaRecorder" in window) || typeof recCanvas.captureStream !== "function") {
+    ui.setSolverStatus("Recording is not supported in this browser", "fail");
+    return;
+  }
+  setRecResolution();
+  const mime = bestMime();
+  const stream = recCanvas.captureStream(30);
+  mediaRecorder = new MediaRecorder(
+    stream,
+    mime ? { mimeType: mime, videoBitsPerSecond: 12_000_000 } : undefined
+  );
+  recChunks = [];
+  mediaRecorder.ondataavailable = (e) => e.data.size && recChunks.push(e.data);
+  mediaRecorder.onstop = () => {
+    const type = mediaRecorder?.mimeType || mime || "video/webm";
+    download(new Blob(recChunks, { type }), type.includes("mp4") ? "mp4" : "webm");
+  };
+  mediaRecorder.start();
+  recording = true;
+  recStartMs = clockMs;
+  recResEl.disabled = true;
+  recordBtn.textContent = "■ Stop";
+  recordBtn.classList.add("recording");
+  recBadge.hidden = false;
+}
+
+function stopRecording(): void {
+  if (!recording || !mediaRecorder) return;
+  mediaRecorder.stop();
+  recording = false;
+  recResEl.disabled = false;
+  recordBtn.textContent = "● Record";
+  recordBtn.classList.remove("recording");
+  recBadge.hidden = true;
+}
+
+recordBtn.addEventListener("click", () => (recording ? stopRecording() : startRecording()));
+
+snapshotBtn.addEventListener("click", () => {
+  setRecResolution();
+  recRenderer.render(scene, wristCam);
+  recCanvas.toBlob((blob) => blob && download(blob, "png"), "image/png");
+});
+
+// --- Home: pose where the wrist cam frames the whole board ------------------
+const HOME_HEIGHT = 0.34; // grasp-point height above the board (m)
+// Park the wrist back over the near edge: the wrist cam's forward tilt then
+// sweeps the whole board from near to far.
+const HOME_ZOFF = -0.18;
+const HOME_FOCAL = 15; // wide enough to see all 8x8
+function goHome(): void {
+  if (editMode) setEditMode(false);
+  cancelSequence();
+  held = null;
+  const c = board.group.position;
+  const target = new THREE.Vector3(c.x, HOME_HEIGHT, c.z + HOME_ZOFF);
+  const r = solveVerticalIK(robot, target);
+  focalEl.value = String(HOME_FOCAL);
+  applyFocal(HOME_FOCAL);
+  marker.position.copy(target);
+  reportSolve(r, target);
+  ui.setSolverStatus("Home — wrist cam board view", r.success ? "ok" : "warn");
+  runSequence([{ grip: 1 }, { arm: r.angles }]);
+}
+document.getElementById("home")!.addEventListener("click", goHome);
+
 // --- Render loop ------------------------------------------------------------
 const viewSize = new THREE.Vector2();
 let last = performance.now();
@@ -413,6 +533,13 @@ function tick(now: number): void {
     renderer.setScissor(pipRect.x, pipRect.y, pipRect.w, pipRect.h);
     renderer.render(scene, wristCam);
     renderer.setScissorTest(false);
+  }
+
+  // Feed the recording canvas (its captureStream samples it).
+  if (recording) {
+    recRenderer.render(scene, wristCam);
+    const s = Math.floor((clockMs - recStartMs) / 1000);
+    recBadge.textContent = `● REC ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
 
   requestAnimationFrame(tick);
