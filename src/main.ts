@@ -1,0 +1,284 @@
+import * as THREE from "three";
+import { createScene } from "./scene";
+import { Robot, JOINT_SPECS, REST_POSE } from "./robot";
+import { solveVerticalIK } from "./ik";
+import { Chessboard, BOARD_CONFIG, Pick } from "./chessboard";
+import { pieceHeight } from "./pieces";
+import { UI } from "./ui";
+
+const canvas = document.getElementById("scene") as HTMLCanvasElement;
+const { scene, camera, renderer, controls } = createScene(canvas);
+controls.target.set(0, 0.08, 0.16);
+
+// --- Robot ------------------------------------------------------------------
+const robot = new Robot();
+robot.root.position.set(0, 0, -0.12); // base sits just behind the board
+scene.add(robot.root);
+
+// --- Chessboard -------------------------------------------------------------
+const board = new Chessboard(BOARD_CONFIG);
+scene.add(board.group);
+
+// --- Target marker ----------------------------------------------------------
+const marker = new THREE.Group();
+const ring = new THREE.Mesh(
+  new THREE.TorusGeometry(0.022, 0.004, 12, 32),
+  new THREE.MeshBasicMaterial({ color: 0xff4d6d })
+);
+ring.rotation.x = Math.PI / 2;
+marker.add(ring);
+scene.add(marker);
+
+// --- UI ---------------------------------------------------------------------
+const ui = new UI();
+const eePos = new THREE.Vector3();
+function refreshReadout(): void {
+  robot.getEndEffectorPosition(eePos);
+  ui.setEndEffector(eePos);
+}
+
+ui.build(JOINT_SPECS, REST_POSE, {
+  onJointChange: (index, radians) => {
+    cancelSequence();
+    robot.setAngle(index, radians);
+    refreshReadout();
+    ui.setSolverStatus("Manual joint control", "idle");
+  },
+  onMove: (target) => {
+    marker.position.copy(target);
+    const r = solveVerticalIK(robot, target);
+    reportSolve(r, target);
+    runSequence([{ arm: r.angles }]);
+  },
+  onReset: () => {
+    cancelSequence();
+    held = null;
+    ui.setSolverStatus("Reset pose", "idle");
+    runSequence([{ grip: 1 }, { arm: REST_POSE.slice() }]);
+  },
+});
+
+marker.position.copy(ui.getTarget());
+refreshReadout();
+
+function reportSolve(r: ReturnType<typeof solveVerticalIK>, _t: THREE.Vector3): void {
+  const errMm = (r.error * 1000).toFixed(1);
+  if (r.success) {
+    ui.setSolverStatus(`Reached · gripper vertical · err ${errMm} mm`, "ok");
+  } else if (!r.reachable) {
+    ui.setSolverStatus(`Unreachable · nearest pose · err ${errMm} mm`, "fail");
+  } else {
+    ui.setSolverStatus(`Joint-limited · nearest pose · err ${errMm} mm`, "warn");
+  }
+}
+
+// --- Pick & place sequencing ------------------------------------------------
+type Step =
+  | { arm: number[] }
+  | { grip: number; attach?: THREE.Group; detach?: { file: number; rank: number; piece: THREE.Group } };
+
+let queue: Step[] = [];
+let held: THREE.Group | null = null;
+
+// Active interpolations.
+let armAnim: { start: number[]; end: number[]; t0: number; dur: number } | null = null;
+let gripAnim: { start: number; end: number; t0: number; dur: number } | null = null;
+let waiting: "arm" | "grip" | null = null;
+let clockMs = 0;
+
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+function runSequence(steps: Step[]): void {
+  cancelSequence();
+  queue = steps;
+  startNextStep();
+}
+
+function cancelSequence(): void {
+  queue = [];
+  armAnim = null;
+  gripAnim = null;
+  waiting = null;
+}
+
+function startNextStep(): void {
+  const step = queue.shift();
+  if (!step) {
+    waiting = null;
+    return;
+  }
+  if ("arm" in step) {
+    armAnim = { start: robot.getAngles(), end: step.arm, t0: clockMs, dur: 750 };
+    waiting = "arm";
+  } else {
+    if (step.attach) robot.gripper.attach(step.attach);
+    if (step.detach) {
+      board.placePieceOnSquare(step.detach.piece, step.detach.file, step.detach.rank);
+      board.group.attach(step.detach.piece); // ensure in board after attach
+    }
+    gripAnim = { start: robot.getGripper(), end: step.grip, t0: clockMs, dur: 300 };
+    waiting = "grip";
+  }
+}
+
+// Build a pick sequence: approach above, open, descend, close+grab, lift.
+function planPick(pick: Extract<Pick, { kind: "piece" }>): void {
+  const grasp = board.graspPointForPiece(pick.group);
+  const above = grasp.clone();
+  above.y += 0.07;
+  const sGrasp = solveVerticalIK(robot, grasp);
+  const sAbove = solveVerticalIK(robot, above);
+  marker.position.copy(grasp);
+  if (!sGrasp.success || !sAbove.success) {
+    reportSolve(sGrasp.success ? sAbove : sGrasp, grasp);
+    return;
+  }
+  ui.setSolverStatus(`Picking up ${pick.color} ${pick.type}`, "ok");
+  held = pick.group;
+  runSequence([
+    { arm: sAbove.angles },
+    { grip: 1 },
+    { arm: sGrasp.angles },
+    { grip: 0, attach: pick.group },
+    { arm: sAbove.angles },
+  ]);
+}
+
+// Build a place sequence: approach above, descend, open+release, lift.
+function planPlace(file: number, rank: number): void {
+  if (!held) return;
+  const piece = held;
+  const center = board.worldSquareCenter(file, rank);
+  const grasp = center.clone();
+  grasp.y += pieceHeight(piece.userData.type) * 0.6;
+  const above = grasp.clone();
+  above.y += 0.07;
+  const sGrasp = solveVerticalIK(robot, grasp);
+  const sAbove = solveVerticalIK(robot, above);
+  marker.position.copy(center);
+  if (!sGrasp.success || !sAbove.success) {
+    reportSolve(sGrasp.success ? sAbove : sGrasp, grasp);
+    return;
+  }
+  ui.setSolverStatus(`Placing on ${"abcdefgh"[file]}${rank + 1}`, "ok");
+  held = null;
+  runSequence([
+    { arm: sAbove.angles },
+    { arm: sGrasp.angles },
+    { grip: 1, detach: { file, rank, piece } },
+    { arm: sAbove.angles },
+  ]);
+}
+
+// --- Raycasting / clickable targets ----------------------------------------
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let downPos = { x: 0, y: 0 };
+
+canvas.addEventListener("pointerdown", (e) => (downPos = { x: e.clientX, y: e.clientY }));
+
+canvas.addEventListener("pointerup", (e) => {
+  if (Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 6) return; // a drag
+  if (waiting) return; // ignore clicks mid-motion
+
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  const hits = raycaster.intersectObjects(board.pickables, true);
+  if (hits.length === 0) return;
+  const pick = board.resolvePick(hits[0].object);
+  if (!pick) return;
+
+  if (held) {
+    // Place on the clicked square (or the square under a clicked piece).
+    const file = pick.kind === "square" ? pick.file : (pick.group.userData.file as number);
+    const rank = pick.kind === "square" ? pick.rank : (pick.group.userData.rank as number);
+    planPlace(file, rank);
+  } else if (pick.kind === "piece") {
+    planPick(pick);
+  } else {
+    // Empty square: just send the gripper there (vertical), no grab.
+    const target = board.worldSquareCenter(pick.file, pick.rank);
+    target.y += 0.02;
+    marker.position.copy(target);
+    const r = solveVerticalIK(robot, target);
+    reportSolve(r, target);
+    ui.setTarget(target);
+    runSequence([{ arm: r.angles }]);
+  }
+});
+
+// --- Wrist-camera picture-in-picture ---------------------------------------
+const wristCam = robot.wristCamera;
+const pipEl = document.getElementById("pip") as HTMLDivElement;
+let pipRect = { x: 0, y: 0, w: 0, h: 0 }; // CSS pixels, WebGL (bottom-left) origin
+
+function updatePipRect(): void {
+  const cr = canvas.getBoundingClientRect();
+  const pr = pipEl.getBoundingClientRect();
+  pipRect = {
+    x: pr.left - cr.left,
+    y: cr.height - (pr.top - cr.top + pr.height), // flip to bottom-left origin
+    w: pr.width,
+    h: pr.height,
+  };
+  if (pr.height > 0) {
+    wristCam.aspect = pr.width / pr.height;
+    wristCam.updateProjectionMatrix();
+  }
+}
+window.addEventListener("resize", updatePipRect);
+updatePipRect();
+
+// --- Render loop ------------------------------------------------------------
+const viewSize = new THREE.Vector2();
+let last = performance.now();
+function tick(now: number): void {
+  const dt = now - last;
+  last = now;
+  clockMs += dt;
+
+  if (armAnim) {
+    const t = Math.min(1, (clockMs - armAnim.t0) / armAnim.dur);
+    const e = easeInOutCubic(t);
+    const angles = armAnim.start.map((s, i) => s + (armAnim!.end[i] - s) * e);
+    robot.setAngles(angles);
+    ui.setSliderValues(angles);
+    refreshReadout();
+    if (t >= 1) {
+      armAnim = null;
+      if (waiting === "arm") startNextStep();
+    }
+  }
+
+  if (gripAnim) {
+    const t = Math.min(1, (clockMs - gripAnim.t0) / gripAnim.dur);
+    robot.setGripper(gripAnim.start + (gripAnim.end - gripAnim.start) * t);
+    if (t >= 1) {
+      gripAnim = null;
+      if (waiting === "grip") startNextStep();
+    }
+  }
+
+  controls.update();
+
+  // Main view (full canvas).
+  renderer.getSize(viewSize);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, viewSize.x, viewSize.y);
+  renderer.render(scene, camera);
+
+  // Wrist-camera inset.
+  if (pipRect.w > 0) {
+    renderer.setScissorTest(true);
+    renderer.setViewport(pipRect.x, pipRect.y, pipRect.w, pipRect.h);
+    renderer.setScissor(pipRect.x, pipRect.y, pipRect.w, pipRect.h);
+    renderer.render(scene, wristCam);
+    renderer.setScissorTest(false);
+  }
+
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);

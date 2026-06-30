@@ -1,0 +1,163 @@
+import * as THREE from "three";
+import { createPiece, pieceHeight, PieceType, PieceColor } from "./pieces";
+
+export interface BoardConfig {
+  squareSize: number; // meters
+  center: THREE.Vector3; // world position of board center (on the table)
+}
+
+export const BOARD_CONFIG: BoardConfig = {
+  squareSize: 0.05,
+  center: new THREE.Vector3(0, 0, 0.16),
+};
+
+export interface SquarePick {
+  kind: "square";
+  file: number;
+  rank: number;
+}
+export interface PiecePick {
+  kind: "piece";
+  group: THREE.Group;
+  type: PieceType;
+  color: PieceColor;
+}
+export type Pick = SquarePick | PiecePick;
+
+const BACK_RANK: PieceType[] = [
+  "rook", "knight", "bishop", "queen", "king", "bishop", "knight", "rook",
+];
+
+/**
+ * 8x8 chessboard with a full standard starting position of Staunton-style
+ * pieces. Provides world coordinates for every square and helpers for the
+ * pick-and-place workflow (resolving clicks, lifting/placing pieces).
+ *
+ * The board lies flat on the X/Z plane at the configured center; file = column
+ * (X), rank = row (Z). Rank 0/1 are white, rank 6/7 are black.
+ */
+export class Chessboard {
+  readonly group: THREE.Group;
+  readonly pickables: THREE.Object3D[] = [];
+  readonly surfaceLocalY: number; // local Y of the playing surface (piece base)
+
+  private readonly n = 8;
+  private readonly boardThickness = 0.012;
+  private readonly tileHeight = 0.003;
+  private readonly half: number;
+
+  constructor(private cfg: BoardConfig = BOARD_CONFIG) {
+    this.group = new THREE.Group();
+    this.group.position.copy(cfg.center);
+    this.half = (this.n * cfg.squareSize) / 2;
+    this.surfaceLocalY = this.boardThickness + this.tileHeight;
+
+    this.buildBoard();
+    this.setupStartingPosition();
+  }
+
+  private buildBoard(): void {
+    const n = this.n;
+    const size = this.cfg.squareSize;
+
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(n * size + 0.03, this.boardThickness, n * size + 0.03),
+      new THREE.MeshStandardMaterial({ color: 0x2c2118, roughness: 0.7 })
+    );
+    frame.position.y = this.boardThickness / 2;
+    frame.receiveShadow = true;
+    this.group.add(frame);
+
+    const light = new THREE.MeshStandardMaterial({ color: 0xe8dcc0, roughness: 0.6 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.6 });
+    const tileGeo = new THREE.BoxGeometry(size * 0.99, this.tileHeight, size * 0.99);
+
+    for (let rank = 0; rank < n; rank++) {
+      for (let file = 0; file < n; file++) {
+        const isLight = (rank + file) % 2 === 0;
+        const sq = new THREE.Mesh(tileGeo, isLight ? light : dark);
+        const { x, z } = this.squareCenterLocal(file, rank);
+        sq.position.set(x, this.boardThickness + this.tileHeight / 2, z);
+        sq.receiveShadow = true;
+        sq.userData.kind = "square";
+        sq.userData.file = file;
+        sq.userData.rank = rank;
+        this.group.add(sq);
+        this.pickables.push(sq);
+      }
+    }
+  }
+
+  private setupStartingPosition(): void {
+    const add = (type: PieceType, color: PieceColor, file: number, rank: number) => {
+      const piece = createPiece(type, color);
+      const { x, z } = this.squareCenterLocal(file, rank);
+      piece.position.set(x, this.surfaceLocalY, z);
+      // White faces +Z (toward black); flip the other side to face opponent.
+      piece.rotation.y = color === "white" ? 0 : Math.PI;
+      piece.userData.file = file;
+      piece.userData.rank = rank;
+      this.group.add(piece);
+      this.pickables.push(piece);
+    };
+
+    for (let file = 0; file < this.n; file++) {
+      add(BACK_RANK[file], "white", file, 0);
+      add("pawn", "white", file, 1);
+      add("pawn", "black", file, 6);
+      add(BACK_RANK[file], "black", file, 7);
+    }
+  }
+
+  /** Local (board-frame) center of a square (X/Z); Y is the surface. */
+  squareCenterLocal(file: number, rank: number): { x: number; z: number } {
+    const size = this.cfg.squareSize;
+    return {
+      x: -this.half + size / 2 + file * size,
+      z: -this.half + size / 2 + rank * size,
+    };
+  }
+
+  /** World position of a square's playing surface. */
+  worldSquareCenter(file: number, rank: number, out = new THREE.Vector3()): THREE.Vector3 {
+    const { x, z } = this.squareCenterLocal(file, rank);
+    return out.set(x, this.surfaceLocalY, z).add(this.group.position);
+  }
+
+  /** Resolve a raycast hit into a square or piece pick (walks up the graph). */
+  resolvePick(hit: THREE.Object3D): Pick | null {
+    let o: THREE.Object3D | null = hit;
+    while (o) {
+      if (o.userData.kind === "square") {
+        return { kind: "square", file: o.userData.file, rank: o.userData.rank };
+      }
+      if (o.userData.type) {
+        return {
+          kind: "piece",
+          group: o as THREE.Group,
+          type: o.userData.type,
+          color: o.userData.color,
+        };
+      }
+      o = o.parent;
+    }
+    return null;
+  }
+
+  /** Grasp point (world) for holding a piece, around its upper body. */
+  graspPointForPiece(piece: THREE.Group, out = new THREE.Vector3()): THREE.Vector3 {
+    piece.getWorldPosition(out);
+    out.y = this.group.position.y + this.surfaceLocalY + pieceHeight(piece.userData.type) * 0.6;
+    return out;
+  }
+
+  /** Reparent a held piece back onto a square, base on the surface. */
+  placePieceOnSquare(piece: THREE.Group, file: number, rank: number): void {
+    this.group.attach(piece); // preserves world transform, then we set it cleanly
+    const { x, z } = this.squareCenterLocal(file, rank);
+    piece.position.set(x, this.surfaceLocalY, z);
+    piece.rotation.set(0, piece.userData.color === "white" ? 0 : Math.PI, 0);
+    piece.userData.file = file;
+    piece.userData.rank = rank;
+  }
+}
