@@ -356,6 +356,18 @@ function updatePipRect(): void {
 window.addEventListener("resize", updatePipRect);
 updatePipRect();
 
+// Wrist-camera focal length (zoom). setFocalLength derives the FOV from the
+// camera's 35mm film gauge, so the slider reads in millimeters.
+const focalEl = document.getElementById("focal") as HTMLInputElement;
+const focalVal = document.getElementById("focalVal") as HTMLSpanElement;
+function applyFocal(mm: number): void {
+  wristCam.setFocalLength(mm);
+  wristCam.updateProjectionMatrix();
+  focalVal.textContent = `${mm} mm`;
+}
+focalEl.addEventListener("input", () => applyFocal(Number(focalEl.value)));
+applyFocal(Number(focalEl.value));
+
 // --- Render loop ------------------------------------------------------------
 const viewSize = new THREE.Vector2();
 let last = performance.now();

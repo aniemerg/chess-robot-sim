@@ -45,6 +45,8 @@ that solving does not disturb the current pose.
   the wrist, so it shows a gripper's-eye view of the target during pick-and-place.
   The image is rolled 180° for an egocentric orientation — the gripper sits at
   the bottom of the frame with the board ahead, like looking down at your hand.
+  The **Focal** slider (under *Wrist camera*) varies the lens focal length in
+  millimeters — drag toward 85 mm to zoom in, toward 12 mm for a wide view.
 - **Board editor** — toggle **Edit board** to rearrange the position by hand
   (the robot parks itself out of the way). Tools:
   - **Move** — click a piece to select it, then click a square to move it
