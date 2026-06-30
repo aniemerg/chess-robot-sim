@@ -3,7 +3,7 @@ import { createScene } from "./scene";
 import { Robot, JOINT_SPECS, REST_POSE } from "./robot";
 import { solveVerticalIK } from "./ik";
 import { Chessboard, BOARD_CONFIG, Pick } from "./chessboard";
-import { pieceHeight } from "./pieces";
+import { pieceHeight, PieceType, PieceColor } from "./pieces";
 import { UI } from "./ui";
 
 const canvas = document.getElementById("scene") as HTMLCanvasElement;
@@ -179,7 +179,6 @@ canvas.addEventListener("pointerdown", (e) => (downPos = { x: e.clientX, y: e.cl
 
 canvas.addEventListener("pointerup", (e) => {
   if (Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 6) return; // a drag
-  if (waiting) return; // ignore clicks mid-motion
 
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -190,6 +189,12 @@ canvas.addEventListener("pointerup", (e) => {
   if (hits.length === 0) return;
   const pick = board.resolvePick(hits[0].object);
   if (!pick) return;
+
+  if (editMode) {
+    handleEditClick(pick);
+    return;
+  }
+  if (waiting) return; // ignore clicks mid-motion
 
   if (held) {
     // Place on the clicked square (or the square under a clicked piece).
@@ -208,6 +213,125 @@ canvas.addEventListener("pointerup", (e) => {
     ui.setTarget(target);
     runSequence([{ arm: r.angles }]);
   }
+});
+
+// --- Board editor -----------------------------------------------------------
+type Tool = "move" | "erase" | PieceType;
+let editMode = false;
+let tool: Tool = "move";
+let brushColor: PieceColor = "white";
+let selected: THREE.Group | null = null;
+
+// Pose that parks the arm upright and off to the side, clearing the board.
+const PARK_POSE = [Math.PI / 2, (-80 * Math.PI) / 180, (-30 * Math.PI) / 180, 0, 0];
+
+// Selection highlight ring.
+const selRing = new THREE.Mesh(
+  new THREE.TorusGeometry(0.022, 0.0035, 12, 32),
+  new THREE.MeshBasicMaterial({ color: 0x57e08a })
+);
+selRing.rotation.x = Math.PI / 2;
+selRing.visible = false;
+scene.add(selRing);
+
+const editorEl = document.getElementById("editor") as HTMLDivElement;
+const editHint = document.getElementById("editHint") as HTMLParagraphElement;
+const removeSelBtn = document.getElementById("removeSel") as HTMLButtonElement;
+const colorBtn = document.getElementById("colorToggle") as HTMLButtonElement;
+
+function setSelected(piece: THREE.Group | null): void {
+  selected = piece;
+  removeSelBtn.disabled = !piece;
+  if (piece) {
+    board.worldSquareCenter(piece.userData.file, piece.userData.rank, selRing.position);
+    selRing.position.y = board.group.position.y + board.surfaceLocalY + 0.004;
+    selRing.visible = true;
+  } else {
+    selRing.visible = false;
+  }
+}
+
+function handleEditClick(pick: Pick): void {
+  if (tool === "move") {
+    if (pick.kind === "piece") {
+      setSelected(pick.group);
+    } else if (selected) {
+      board.movePiece(selected, pick.file, pick.rank);
+      setSelected(selected); // refresh ring at new square
+    }
+  } else if (tool === "erase") {
+    if (pick.kind === "piece") {
+      if (pick.group === selected) setSelected(null);
+      board.removePiece(pick.group);
+    }
+  } else {
+    // A piece-type brush: add/replace at the target square.
+    const file = pick.kind === "square" ? pick.file : (pick.group.userData.file as number);
+    const rank = pick.kind === "square" ? pick.rank : (pick.group.userData.rank as number);
+    setSelected(board.addPiece(tool, brushColor, file, rank));
+  }
+}
+
+function setEditMode(on: boolean): void {
+  editMode = on;
+  editorEl.hidden = !on;
+  const btn = document.getElementById("editToggle") as HTMLButtonElement;
+  btn.textContent = `Edit board: ${on ? "On" : "Off"}`;
+  btn.classList.toggle("on", on);
+  marker.visible = !on;
+  if (on) {
+    cancelSequence();
+    held = null;
+    runSequence([{ grip: 1 }, { arm: PARK_POSE }]); // park the arm out of the way
+    ui.setSolverStatus("Board edit mode — robot parked", "idle");
+  } else {
+    setSelected(null);
+    runSequence([{ arm: REST_POSE.slice() }]);
+    ui.setSolverStatus("Idle", "idle");
+  }
+}
+
+document.getElementById("editToggle")!.addEventListener("click", () => setEditMode(!editMode));
+
+document.querySelectorAll<HTMLButtonElement>(".tool").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".tool").forEach((o) => o.classList.remove("active"));
+    b.classList.add("active");
+    tool = b.dataset.tool as Tool;
+    if (tool !== "move") setSelected(null);
+    editHint.textContent =
+      tool === "move"
+        ? "Click a piece to select, then click a square to move it."
+        : tool === "erase"
+        ? "Click a piece to remove it."
+        : `Click a square to add a ${brushColor} ${tool}.`;
+  });
+});
+
+colorBtn.addEventListener("click", () => {
+  brushColor = brushColor === "white" ? "black" : "white";
+  colorBtn.textContent = `Color: ${brushColor === "white" ? "White" : "Black"}`;
+  colorBtn.classList.toggle("black", brushColor === "black");
+  if (tool !== "move" && tool !== "erase") {
+    editHint.textContent = `Click a square to add a ${brushColor} ${tool}.`;
+  }
+  if (selected) setSelected(board.recolorPiece(selected, brushColor)); // recolor in place
+});
+
+removeSelBtn.addEventListener("click", () => {
+  if (selected) {
+    board.removePiece(selected);
+    setSelected(null);
+  }
+});
+
+document.getElementById("setBoard")!.addEventListener("click", () => {
+  board.resetToStart();
+  setSelected(null);
+});
+document.getElementById("clearBoard")!.addEventListener("click", () => {
+  board.clearBoard();
+  setSelected(null);
 });
 
 // --- Wrist-camera picture-in-picture ---------------------------------------

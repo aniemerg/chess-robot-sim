@@ -29,16 +29,17 @@ const BACK_RANK: PieceType[] = [
 ];
 
 /**
- * 8x8 chessboard with a full standard starting position of Staunton-style
- * pieces. Provides world coordinates for every square and helpers for the
- * pick-and-place workflow (resolving clicks, lifting/placing pieces).
+ * 8x8 chessboard with Staunton-style pieces. Provides world coordinates for
+ * every square, helpers for the robot pick-and-place workflow, and a full
+ * editing API (add / remove / move / recolor / clear / reset).
  *
  * The board lies flat on the X/Z plane at the configured center; file = column
  * (X), rank = row (Z). Rank 0/1 are white, rank 6/7 are black.
  */
 export class Chessboard {
   readonly group: THREE.Group;
-  readonly pickables: THREE.Object3D[] = [];
+  readonly squares: THREE.Mesh[] = [];
+  readonly pieces: THREE.Group[] = [];
   readonly surfaceLocalY: number; // local Y of the playing surface (piece base)
 
   private readonly n = 8;
@@ -53,7 +54,12 @@ export class Chessboard {
     this.surfaceLocalY = this.boardThickness + this.tileHeight;
 
     this.buildBoard();
-    this.setupStartingPosition();
+    this.resetToStart();
+  }
+
+  /** Objects the raycaster should test (board tiles + all pieces). */
+  get pickables(): THREE.Object3D[] {
+    return [...this.squares, ...this.pieces];
   }
 
   private buildBoard(): void {
@@ -83,31 +89,77 @@ export class Chessboard {
         sq.userData.file = file;
         sq.userData.rank = rank;
         this.group.add(sq);
-        this.pickables.push(sq);
+        this.squares.push(sq);
       }
     }
   }
 
-  private setupStartingPosition(): void {
-    const add = (type: PieceType, color: PieceColor, file: number, rank: number) => {
-      const piece = createPiece(type, color);
-      const { x, z } = this.squareCenterLocal(file, rank);
-      piece.position.set(x, this.surfaceLocalY, z);
-      // White faces +Z (toward black); flip the other side to face opponent.
-      piece.rotation.y = color === "white" ? 0 : Math.PI;
-      piece.userData.file = file;
-      piece.userData.rank = rank;
-      this.group.add(piece);
-      this.pickables.push(piece);
-    };
+  // --- Editing API ----------------------------------------------------------
 
+  /** Add a piece to a square, replacing any piece already there. Returns it. */
+  addPiece(type: PieceType, color: PieceColor, file: number, rank: number): THREE.Group {
+    const existing = this.pieceAt(file, rank);
+    if (existing) this.removePiece(existing);
+
+    const piece = createPiece(type, color);
+    const { x, z } = this.squareCenterLocal(file, rank);
+    piece.position.set(x, this.surfaceLocalY, z);
+    piece.rotation.y = color === "white" ? 0 : Math.PI; // face the opponent
+    piece.userData.file = file;
+    piece.userData.rank = rank;
+    this.group.add(piece);
+    this.pieces.push(piece);
+    return piece;
+  }
+
+  /** Remove a piece from the board and free its geometry. */
+  removePiece(piece: THREE.Group): void {
+    const i = this.pieces.indexOf(piece);
+    if (i >= 0) this.pieces.splice(i, 1);
+    piece.parent?.remove(piece);
+    piece.traverse((o) => {
+      if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose();
+    });
+  }
+
+  /** Recolor a piece in place (rebuilds it). Returns the new piece. */
+  recolorPiece(piece: THREE.Group, color: PieceColor): THREE.Group {
+    const { type, file, rank } = piece.userData as {
+      type: PieceType; file: number; rank: number;
+    };
+    return this.addPiece(type, color, file, rank); // addPiece removes the old one
+  }
+
+  /** Move a piece onto a square, capturing any occupant. */
+  movePiece(piece: THREE.Group, file: number, rank: number): void {
+    const occupant = this.pieceAt(file, rank);
+    if (occupant && occupant !== piece) this.removePiece(occupant);
+    this.placePieceOnSquare(piece, file, rank);
+  }
+
+  /** Remove every piece. */
+  clearBoard(): void {
+    while (this.pieces.length) this.removePiece(this.pieces[0]);
+  }
+
+  /** Clear and lay out the standard starting position. */
+  resetToStart(): void {
+    this.clearBoard();
     for (let file = 0; file < this.n; file++) {
-      add(BACK_RANK[file], "white", file, 0);
-      add("pawn", "white", file, 1);
-      add("pawn", "black", file, 6);
-      add(BACK_RANK[file], "black", file, 7);
+      this.addPiece(BACK_RANK[file], "white", file, 0);
+      this.addPiece("pawn", "white", file, 1);
+      this.addPiece("pawn", "black", file, 6);
+      this.addPiece(BACK_RANK[file], "black", file, 7);
     }
   }
+
+  pieceAt(file: number, rank: number): THREE.Group | null {
+    return (
+      this.pieces.find((p) => p.userData.file === file && p.userData.rank === rank) ?? null
+    );
+  }
+
+  // --- Geometry helpers -----------------------------------------------------
 
   /** Local (board-frame) center of a square (X/Z); Y is the surface. */
   squareCenterLocal(file: number, rank: number): { x: number; z: number } {
@@ -151,7 +203,7 @@ export class Chessboard {
     return out;
   }
 
-  /** Reparent a held piece back onto a square, base on the surface. */
+  /** Reparent a piece onto a square, base on the surface (used by the robot). */
   placePieceOnSquare(piece: THREE.Group, file: number, rank: number): void {
     this.group.attach(piece); // preserves world transform, then we set it cleanly
     const { x, z } = this.squareCenterLocal(file, rank);

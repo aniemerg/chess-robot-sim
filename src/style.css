@@ -179,6 +179,45 @@ button.secondary:hover {
   line-height: 1.6;
 }
 
+.toggle {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+button.toggle.on {
+  background: #3f7fe0;
+  color: #fff;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tool-grid .tool {
+  padding: 6px 4px;
+  font-size: 11px;
+  background: #2a313d;
+  color: #cdd4df;
+}
+
+.tool-grid .tool:hover {
+  background: #38414f;
+}
+
+.tool-grid .tool.active {
+  background: #3f7fe0;
+  color: #fff;
+}
+
+#colorToggle.black {
+  background: #1b1e24;
+  color: #cdd4df;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
 .readout #ee {
   font-variant-numeric: tabular-nums;
   color: #9ad29a;

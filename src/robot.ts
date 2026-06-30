@@ -158,6 +158,9 @@ export class Robot {
     // -Z view dir -> +Y tool axis, tilted slightly toward the gripper so the
     // fingers frame the shot.
     this.wristCamera.rotation.x = Math.PI / 2 + 0.3;
+    // Roll 180° so the view is egocentric: gripper at the bottom, the board
+    // ahead reading upright (like looking down at your own hand).
+    this.wristCamera.rotateZ(Math.PI);
     j4.add(this.wristCamera);
 
     // J5 — wrist roll about the tool axis.

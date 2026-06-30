@@ -43,6 +43,19 @@ that solving does not disturb the current pose.
 - **Wrist camera** — the inset viewport (lower-right) is a camera mounted just
   below joint 4, looking along the remaining arm toward the gripper. It rides
   the wrist, so it shows a gripper's-eye view of the target during pick-and-place.
+  The image is rolled 180° for an egocentric orientation — the gripper sits at
+  the bottom of the frame with the board ahead, like looking down at your hand.
+- **Board editor** — toggle **Edit board** to rearrange the position by hand
+  (the robot parks itself out of the way). Tools:
+  - **Move** — click a piece to select it, then click a square to move it
+    (capturing any occupant). The selected piece is highlighted with a ring.
+  - **Erase** — click a piece to remove it (or use **Remove selected**).
+  - **Pawn / Knight / Bishop / Rook / Queen / King** — click a square to add (or
+    replace) that piece in the current brush color.
+  - **Color** — toggles the brush between White/Black; also recolors the
+    selected piece.
+  - **Reset to start** restores the standard opening position; **Clear board**
+    removes every piece.
 - **Status** — live grasp-point position plus the IK result (reached /
   joint-limited / unreachable, with error).
 
@@ -123,7 +136,7 @@ src/main.ts          wiring: scene, robot, board, raycasting, pick/place, wrist-
 src/scene.ts         renderer, camera, lights, ground, orbit controls
 src/robot.ts         xArm 5 joint hierarchy + gripper + wrist camera + forward kinematics
 src/ik.ts            analytical vertical-tool inverse kinematics
-src/chessboard.ts    8x8 board + full Staunton set + pick/place helpers
+src/chessboard.ts    8x8 board + Staunton set + pick/place + editing API
 src/pieces.ts        Staunton-style chess piece geometry
 src/ui.ts            HTML control panel controller
 ```

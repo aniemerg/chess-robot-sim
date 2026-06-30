@@ -46,6 +46,32 @@
             <div id="solver" class="solver">Idle</div>
           </div>
         </section>
+
+        <section>
+          <h2>Board editor</h2>
+          <button id="editToggle" class="secondary toggle">Edit board: Off</button>
+          <div id="editor" hidden>
+            <p class="hint" id="editHint">Pick a tool, then click the board.</p>
+            <div class="tool-grid">
+              <button class="tool active" data-tool="move">Move</button>
+              <button class="tool" data-tool="erase">Erase</button>
+              <button class="tool" data-tool="pawn">Pawn</button>
+              <button class="tool" data-tool="knight">Knight</button>
+              <button class="tool" data-tool="bishop">Bishop</button>
+              <button class="tool" data-tool="rook">Rook</button>
+              <button class="tool" data-tool="queen">Queen</button>
+              <button class="tool" data-tool="king">King</button>
+            </div>
+            <div class="buttons">
+              <button id="colorToggle">Color: White</button>
+              <button id="removeSel" class="secondary" disabled>Remove selected</button>
+            </div>
+            <div class="buttons">
+              <button id="setBoard" class="secondary">Reset to start</button>
+              <button id="clearBoard" class="secondary">Clear board</button>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
