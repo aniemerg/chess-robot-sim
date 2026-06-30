@@ -58,6 +58,11 @@ export const JOINT_SPECS: JointSpec[] = [
 // the board. Cumulative pitch (J2 - J3 + J4) = 180°, so the tool points down.
 export const REST_POSE: number[] = [0, d2r(42), d2r(-104), d2r(34), 0];
 
+// Default mounting tilt of the wrist camera relative to the arm axis (radians).
+// This is a calibration value, not a robot joint: it models how the physical
+// camera is angled off the tool axis toward the gripper.
+export const DEFAULT_WRIST_CAM_ANGLE = d2r(17);
+
 export class Robot {
   readonly root: THREE.Group;
   readonly joints: Joint[] = [];
@@ -155,13 +160,8 @@ export class Robot {
     // with the wrist but does not spin with the J5 roll.
     this.wristCamera = new THREE.PerspectiveCamera(66, 1, 0.004, 6);
     this.wristCamera.position.set(0, 0.0, -0.058); // beside the wrist, set back
-    // -Z view dir -> +Y tool axis, tilted slightly toward the gripper so the
-    // fingers frame the shot.
-    this.wristCamera.rotation.x = Math.PI / 2 + 0.3;
-    // Roll 180° so the view is egocentric: gripper at the bottom, the board
-    // ahead reading upright (like looking down at your own hand).
-    this.wristCamera.rotateZ(Math.PI);
     j4.add(this.wristCamera);
+    this.setWristCameraAngle(DEFAULT_WRIST_CAM_ANGLE);
 
     // J5 — wrist roll about the tool axis.
     const j5 = new THREE.Group();
@@ -215,6 +215,17 @@ export class Robot {
     this.leftFinger.castShadow = true;
     this.rightFinger.castShadow = true;
     parent.add(this.leftFinger, this.rightFinger);
+  }
+
+  /**
+   * Set the wrist camera's tilt relative to the arm axis (radians). 0 looks
+   * straight along the remaining arm; positive tilts toward the gripper. The
+   * 180° roll keeps the view egocentric. This is a calibration control, not a
+   * robot joint.
+   */
+  setWristCameraAngle(angle: number): void {
+    this.wristCamera.rotation.set(Math.PI / 2 + angle, 0, 0);
+    this.wristCamera.rotateZ(Math.PI);
   }
 
   /** open = 1 fully open, 0 fully closed. */

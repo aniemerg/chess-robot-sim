@@ -368,6 +368,16 @@ function applyFocal(mm: number): void {
 focalEl.addEventListener("input", () => applyFocal(Number(focalEl.value)));
 applyFocal(Number(focalEl.value));
 
+// Wrist-camera mount angle vs the arm axis — a calibration DOF, not a joint.
+const camAngleEl = document.getElementById("camAngle") as HTMLInputElement;
+const camAngleVal = document.getElementById("camAngleVal") as HTMLSpanElement;
+function applyCamAngle(deg: number): void {
+  robot.setWristCameraAngle((deg * Math.PI) / 180);
+  camAngleVal.textContent = `${deg}°`;
+}
+camAngleEl.addEventListener("input", () => applyCamAngle(Number(camAngleEl.value)));
+applyCamAngle(Number(camAngleEl.value));
+
 // --- Wrist-cam recording + snapshot ----------------------------------------
 // A dedicated offscreen canvas + renderer captures the wrist view on its own
 // (the on-screen inset is just a scissor region of the main canvas, so it

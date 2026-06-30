@@ -50,6 +50,10 @@ that solving does not disturb the current pose.
   the bottom of the frame with the board ahead, like looking down at your hand.
   The **Focal** slider (under *Wrist camera*) varies the lens focal length in
   millimeters — drag toward 85 mm to zoom in, toward 12 mm for a wide view.
+- **Angle** (under *Wrist camera*) — a calibration control (not a robot joint)
+  for the camera's mounting tilt relative to the arm axis: 0° looks straight
+  along the remaining arm, larger values tilt toward the gripper. Use it to
+  match the simulated view to a real wrist-mounted camera.
 - **Record / Snapshot** — under *Wrist camera*, **Record** captures the wrist
   view to a video file (a red ●REC badge with an elapsed timer shows on the
   inset); pressing **Stop** downloads it. **Snapshot** saves a single still.
