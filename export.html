@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>xArm 5 — episode export</title>
+    <style>
+      html, body { margin: 0; background: #000; }
+      /* The GL canvas renders both views; the 2D canvas adds the caption and is
+         what gets captured. Both are shown for debugging. */
+      #gl { display: none; }
+      #out { display: block; image-rendering: pixelated; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <canvas id="out"></canvas>
+    <script type="module" src="/src/export.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>xArm 5 — camera / board calibration</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #14171d; color: #e6e9ef; display: flex; }
+      #stage { position: relative; padding: 16px; }
+      #view { position: relative; width: 640px; height: 544px; border: 1px solid #333; }
+      #cal { display: block; width: 640px; height: 544px; }
+      #ref { position: absolute; inset: 0; width: 640px; height: 544px; pointer-events: none; display: none; object-fit: fill; }
+      #panel { width: 300px; padding: 16px; background: #1b1f27; height: 100vh; overflow-y: auto; }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      .hint { font-size: 11px; color: #8b95a7; line-height: 1.5; }
+      .row { margin: 12px 0; }
+      .row label { font-size: 12px; color: #aab3c2; display: block; margin-bottom: 4px; }
+      input[type="range"] { width: 100%; }
+      .btns { display: flex; gap: 6px; }
+      .btns button, .act button { flex: 1; padding: 6px; font-size: 12px; background: #2a313d; color: #cdd4df; border: none; border-radius: 6px; cursor: pointer; }
+      .btns button.on { background: #3f7fe0; color: #fff; }
+      textarea { width: 100%; height: 130px; background: #0c0f15; color: #9ad29a; border: 1px solid #333; border-radius: 6px; font: 11px monospace; padding: 8px; }
+      .val { color: #cdd4df; font-variant-numeric: tabular-nums; }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="view">
+        <canvas id="cal" width="640" height="544"></canvas>
+        <img id="ref" />
+      </div>
+      <p class="hint" style="width:640px">
+        Left-drag = orbit &middot; right-drag = pan &middot; scroll = zoom. Match the
+        overhead to the reference, set board rotation, then copy the config below back to me.
+      </p>
+    </div>
+    <div id="panel">
+      <h1>Calibration</h1>
+      <p class="hint" id="epLabel"></p>
+
+      <div class="row">
+        <label>Reference overlay</label>
+        <div class="btns"><button id="refToggle">Show reference</button></div>
+        <input id="refOpacity" type="range" min="0" max="100" value="45" />
+      </div>
+
+      <div class="row">
+        <label>Field of view: <span id="fovVal" class="val"></span></label>
+        <input id="fov" type="range" min="20" max="80" step="1" />
+      </div>
+      <div class="row">
+        <label>Roll: <span id="rollVal" class="val"></span></label>
+        <input id="roll" type="range" min="-45" max="45" step="1" value="0" />
+      </div>
+
+      <div class="row">
+        <label>Board rotation</label>
+        <div class="btns">
+          <button data-rot="0">0&deg;</button>
+          <button data-rot="90">90&deg;</button>
+          <button data-rot="180">180&deg;</button>
+          <button data-rot="270">270&deg;</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>Robot base X: <span id="bxVal" class="val"></span></label>
+        <input id="bx" type="range" min="-0.5" max="0.5" step="0.01" />
+        <label style="margin-top:6px">Robot base Z: <span id="bzVal" class="val"></span></label>
+        <input id="bz" type="range" min="-0.5" max="0.6" step="0.01" />
+      </div>
+
+      <div class="row act">
+        <label>Config (copy this to me)</label>
+        <textarea id="out" readonly></textarea>
+      </div>
+    </div>
+    <script type="module" src="/src/calibrate.ts"></script>
+  </body>
+</html>

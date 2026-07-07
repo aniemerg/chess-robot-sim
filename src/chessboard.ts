@@ -4,6 +4,10 @@ import { createPiece, pieceHeight, PieceType, PieceColor } from "./pieces";
 export interface BoardConfig {
   squareSize: number; // meters
   center: THREE.Vector3; // world position of board center (on the table)
+  lightColor?: number;
+  darkColor?: number;
+  frameColor?: number;
+  labels?: boolean; // print a-h / 1-8 around the border
 }
 
 export const BOARD_CONFIG: BoardConfig = {
@@ -54,6 +58,7 @@ export class Chessboard {
     this.surfaceLocalY = this.boardThickness + this.tileHeight;
 
     this.buildBoard();
+    if (cfg.labels) this.buildLabels();
     this.resetToStart();
   }
 
@@ -68,19 +73,20 @@ export class Chessboard {
 
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(n * size + 0.03, this.boardThickness, n * size + 0.03),
-      new THREE.MeshStandardMaterial({ color: 0x2c2118, roughness: 0.7 })
+      new THREE.MeshStandardMaterial({ color: this.cfg.frameColor ?? 0x2c2118, roughness: 0.7 })
     );
     frame.position.y = this.boardThickness / 2;
     frame.receiveShadow = true;
     this.group.add(frame);
 
-    const light = new THREE.MeshStandardMaterial({ color: 0xe8dcc0, roughness: 0.6 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.6 });
+    const light = new THREE.MeshStandardMaterial({ color: this.cfg.lightColor ?? 0xe8dcc0, roughness: 0.6 });
+    const dark = new THREE.MeshStandardMaterial({ color: this.cfg.darkColor ?? 0x6b4a2f, roughness: 0.6 });
     const tileGeo = new THREE.BoxGeometry(size * 0.99, this.tileHeight, size * 0.99);
 
     for (let rank = 0; rank < n; rank++) {
       for (let file = 0; file < n; file++) {
-        const isLight = (rank + file) % 2 === 0;
+        // Standard chess coloring: a1 (file 0, rank 0) is dark; a8 is light.
+        const isLight = (rank + file) % 2 === 1;
         const sq = new THREE.Mesh(tileGeo, isLight ? light : dark);
         const { x, z } = this.squareCenterLocal(file, rank);
         sq.position.set(x, this.boardThickness + this.tileHeight / 2, z);
@@ -91,6 +97,50 @@ export class Chessboard {
         this.group.add(sq);
         this.squares.push(sq);
       }
+    }
+  }
+
+  /** Print file letters (a-h) and rank numbers (1-8) around the border. */
+  private buildLabels(): void {
+    const size = this.cfg.squareSize;
+    const off = this.half + size * 0.42; // just outside the playing area
+    const y = this.boardThickness + 0.001;
+
+    const makeLabel = (txt: string): THREE.Mesh => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 64;
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#20242b";
+      g.font = "bold 46px system-ui, sans-serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText(txt, 32, 34);
+      const tex = new THREE.CanvasTexture(c);
+      tex.anisotropy = 4;
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(size * 0.6, size * 0.6),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+      );
+      m.rotation.x = -Math.PI / 2; // lie flat, facing up
+      return m;
+    };
+
+    for (let f = 0; f < this.n; f++) {
+      const { x } = this.squareCenterLocal(f, 0);
+      const near = makeLabel("abcdefgh"[f]);
+      near.position.set(x, y, -off);
+      const far = makeLabel("abcdefgh"[f]);
+      far.position.set(x, y, off);
+      far.rotation.z = Math.PI;
+      this.group.add(near, far);
+    }
+    for (let r = 0; r < this.n; r++) {
+      const { z } = this.squareCenterLocal(0, r);
+      const left = makeLabel(String(r + 1));
+      left.position.set(-off, y, z);
+      const right = makeLabel(String(r + 1));
+      right.position.set(off, y, z);
+      this.group.add(left, right);
     }
   }
 
@@ -170,10 +220,12 @@ export class Chessboard {
     };
   }
 
-  /** World position of a square's playing surface. */
+  /** World position of a square's playing surface (respects board rotation). */
   worldSquareCenter(file: number, rank: number, out = new THREE.Vector3()): THREE.Vector3 {
     const { x, z } = this.squareCenterLocal(file, rank);
-    return out.set(x, this.surfaceLocalY, z).add(this.group.position);
+    out.set(x, this.surfaceLocalY, z);
+    this.group.updateMatrixWorld();
+    return this.group.localToWorld(out);
   }
 
   /** Resolve a raycast hit into a square or piece pick (walks up the graph). */

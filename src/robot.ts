@@ -223,9 +223,9 @@ export class Robot {
    * 180° roll keeps the view egocentric. This is a calibration control, not a
    * robot joint.
    */
-  setWristCameraAngle(angle: number): void {
+  setWristCameraAngle(angle: number, roll = Math.PI): void {
     this.wristCamera.rotation.set(Math.PI / 2 + angle, 0, 0);
-    this.wristCamera.rotateZ(Math.PI);
+    this.wristCamera.rotateZ(roll);
   }
 
   /** open = 1 fully open, 0 fully closed. */
