@@ -7,3 +7,4 @@ shot-*.png
 replicas/
 public/ref_*.png
 rollouts/
+public/rollouts/
