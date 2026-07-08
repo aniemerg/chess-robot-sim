@@ -106,12 +106,13 @@ overhead.lookAt(boardCenter.x, boardCenter.y, 0.02);
 // locks the tool yaw, the endEffector orientation is constant in world, so the
 // camera holds a fixed orientation and only translates with the arm — exactly
 // like the real wrist cam. Mount pose is tunable (to be PnP-calibrated later).
-robot.toolYawTarget = 0; // gripper jaw azimuth (world); tune to the real gripper
+// Grip plane azimuth (world). The jaws (and the wrist camera mounted on them)
+// rotate with this. 90deg puts the jaws perpendicular to the +x default.
+robot.toolYawTarget = Math.PI / 2;
 const wrist = new THREE.PerspectiveCamera(58, HALF / H, 0.005, 6);
 robot.endEffector.add(wrist);
 wrist.position.set(0, -0.075, -0.055); // local: beside + above the gripper
 wrist.rotation.set(Math.PI - 0.42, 0, 0); // look down, tilted toward the gripper/board
-wrist.rotateZ(Math.PI / 2); // roll the image 90 deg clockwise
 
 // --- Episode setup ----------------------------------------------------------
 const params = new URLSearchParams(location.search);
