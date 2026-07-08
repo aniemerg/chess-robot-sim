@@ -56,9 +56,9 @@ scene.add(buildBoard());
 
 // --- Cameras ----------------------------------------------------------------
 // Overhead pose from PnP fit to the real base image (tools/pnp-overhead.mjs).
-const overhead = new THREE.PerspectiveCamera(42, HALF / IMG_H, 0.01, 50);
+const overhead = new THREE.PerspectiveCamera(44, HALF / IMG_H, 0.01, 50);
 overhead.up.set(0, 0, 1);
-overhead.position.set(0.428, -0.1062, 1.0928);
+overhead.position.set(0.4667, 0.4617, 0.9797);
 overhead.lookAt(0.4226, 0.0223, 0.2235);
 
 // Wrist camera — RIGIDLY ATTACHED to the wrist (endEffector frame). Since J5
@@ -72,7 +72,7 @@ robot.toolYawTarget = -Math.PI / 2;
 const wrist = new THREE.PerspectiveCamera(58, HALF / H, 0.005, 6);
 robot.endEffector.add(wrist);
 wrist.position.set(0, -0.075, -0.055); // local: beside + above the gripper
-wrist.rotation.set(Math.PI - 0.42, 0, 0); // look down, tilted toward the gripper/board
+wrist.rotation.set(Math.PI - (2 * Math.PI) / 180, 0, 0); // wrist tilt = 2deg (calibrated)
 
 // --- Episode setup ----------------------------------------------------------
 const params = new URLSearchParams(location.search);
