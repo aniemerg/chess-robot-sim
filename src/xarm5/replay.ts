@@ -189,7 +189,7 @@ function renderComposite(): void {
 }
 
 function renderFrame(i: number): string {
-  const f = Math.max(0, Math.min(frames.length - 1, i));
+  const f = Math.max(0, Math.min(solvedAngles.length - 1, i));
   applyGripState(f);
   robot.setAnglesDeg(solvedAngles[f]);
   robot.setGripper(grip[f]);
