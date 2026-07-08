@@ -34,6 +34,8 @@ export interface Episode {
   preset: OverheadPreset;
   /** Board yaw about its center, degrees (calibration). */
   boardRotation?: number;
+  /** Reverse file direction (a<->h) to match the source board; flips colors. */
+  mirrorFiles?: boolean;
   /** Robot base position in world meters [x, y, z]. */
   base: [number, number, number];
   action: MoveAction | PickAction;
@@ -46,6 +48,7 @@ export const EPISODES: Record<string, Episode> = {
     board: true,
     preset: "C",
     boardRotation: 270,
+    mirrorFiles: true,
     base: [0.33, 0, 0.16],
     action: { kind: "move", color: "white", piece: "queen", from: "e7", to: "h1" },
   },

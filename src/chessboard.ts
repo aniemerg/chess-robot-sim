@@ -8,6 +8,7 @@ export interface BoardConfig {
   darkColor?: number;
   frameColor?: number;
   labels?: boolean; // print a-h / 1-8 around the border
+  mirrorFiles?: boolean; // reverse file direction (a<->h); also flips colors
 }
 
 export const BOARD_CONFIG: BoardConfig = {
@@ -214,8 +215,9 @@ export class Chessboard {
   /** Local (board-frame) center of a square (X/Z); Y is the surface. */
   squareCenterLocal(file: number, rank: number): { x: number; z: number } {
     const size = this.cfg.squareSize;
+    const f = this.cfg.mirrorFiles ? this.n - 1 - file : file;
     return {
-      x: -this.half + size / 2 + file * size,
+      x: -this.half + size / 2 + f * size,
       z: -this.half + size / 2 + rank * size,
     };
   }

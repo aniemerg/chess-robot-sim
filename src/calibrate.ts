@@ -54,6 +54,7 @@ const cfg: BoardConfig = {
   darkColor: 0x2f6b43,
   frameColor: 0xd8d1bb,
   labels: true,
+  mirrorFiles: ep.mirrorFiles ?? false,
 };
 const board = new Chessboard(cfg);
 board.clearBoard();

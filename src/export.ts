@@ -29,7 +29,7 @@ const OVERHEAD: Record<OverheadPreset, CamPreset> = {
 // Wrist camera for replication: straight down the tool (angle 0), no egocentric
 // roll; ROLL orients the board in the wrist image.
 const WRIST_ANGLE_DEG = 0;
-const WRIST_ROLL_DEG = 90;
+const WRIST_ROLL_DEG = 180; // orient the wrist view so a1 is bottom-left (matches source)
 const WRIST_FOV = 52; // narrower than the app's egocentric cam, to frame the board
 
 const HOME_HEIGHT = 0.4; // arm hover height over board center for the framing pose
@@ -101,6 +101,7 @@ if (ep.board) {
     darkColor: 0x2f6b43,
     frameColor: 0xd8d1bb,
     labels: true,
+    mirrorFiles: ep.mirrorFiles ?? false,
   };
   board = new Chessboard(cfg);
   board.clearBoard();
@@ -118,6 +119,8 @@ const overhead = new THREE.PerspectiveCamera(OVERHEAD[ep.preset].fov, HALF / H, 
   overhead.lookAt(new THREE.Vector3(...p.target));
   overhead.rotateZ((p.roll * Math.PI) / 180);
 }
+const wroll = Number(params.get("wroll") ?? WRIST_ROLL_DEG);
+robot.setWristCameraAngle((WRIST_ANGLE_DEG * Math.PI) / 180, (wroll * Math.PI) / 180);
 const wristCam = robot.wristCamera;
 wristCam.fov = WRIST_FOV;
 wristCam.updateProjectionMatrix();
