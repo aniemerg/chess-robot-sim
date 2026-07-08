@@ -92,6 +92,32 @@ refreshMarkers();
     robot.setAnglesDeg([0, 0, 0, 0, 0]);
     refreshMarkers();
   },
+  // Close-up on the end tool + gripper for diagnosis.
+  closeup(dx = 0.18, dy = -0.18, dz = 0.06) {
+    const ee = robot.endEffector.getWorldPosition(new THREE.Vector3());
+    camera.position.set(ee.x + dx, ee.y + dy, ee.z + dz);
+    controls.target.copy(ee);
+    controls.update();
+  },
+  setAngle(i: number, deg: number) {
+    const a = robot.getAnglesDeg();
+    a[i] = deg;
+    robot.setAnglesDeg(a);
+    refreshMarkers();
+  },
+  // World directions of the tool/flange and gripper local axes at the current pose.
+  axes() {
+    const q = new THREE.Quaternion();
+    const dir = (o: THREE.Object3D, ax: [number, number, number]) => {
+      o.getWorldQuaternion(q);
+      return new THREE.Vector3(...ax).applyQuaternion(q).toArray().map((v) => +v.toFixed(3));
+    };
+    const tool = robot.endEffector; // same orientation as the tool frame
+    return {
+      tool_X: dir(tool, [1, 0, 0]), tool_Y: dir(tool, [0, 1, 0]), tool_Z: dir(tool, [0, 0, 1]),
+      grip_X: dir(robot.gripper, [1, 0, 0]), grip_Y: dir(robot.gripper, [0, 1, 0]), grip_Z: dir(robot.gripper, [0, 0, 1]),
+    };
+  },
 };
 
 function resize(): void {

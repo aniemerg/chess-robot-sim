@@ -20,7 +20,9 @@ const deg2rad = (d: number) => (d * Math.PI) / 180;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 const WORLD_DOWN = new THREE.Vector3(0, 0, -1); // Z-up world
-const GRIPPER_LOCAL_AXIS = new THREE.Vector3(0, 0, 1); // gripper points along +Z toward the fingertips
+// Approach axis of the gripper (points down when the tool is vertical). See the
+// buildGripper note for how the inline gripper is aligned to it.
+const GRIPPER_LOCAL_AXIS = new THREE.Vector3(0, 0, 1);
 const VERTICAL_WEIGHT = 0.24;
 
 interface JointRuntime {
@@ -81,14 +83,14 @@ export class Xarm5Robot {
     this.addMesh(tool, "/assets/end_tool/visual/end_tool_1300.stl", "dark", opts.onMeshLoad);
 
     this.endEffector = new THREE.Object3D();
-    this.endEffector.position.set(0.085, 0, 0);
+    this.endEffector.position.set(0, 0, 0.035); // along +Z, the approach axis
     tool.add(this.endEffector);
 
     this.gripper = this.buildGripper();
     this.endEffector.add(this.gripper);
 
     this.tcp = new THREE.Object3D();
-    this.tcp.position.set(0, 0, 0.09);
+    this.tcp.position.set(0, 0, 0.085); // between the fingertips, along the approach axis
     this.gripper.add(this.tcp);
 
     this.setAnglesDeg(XARM5_JOINTS.map((j) => j.homeDeg));
@@ -119,20 +121,22 @@ export class Xarm5Robot {
   }
 
   private buildGripper(): THREE.Group {
+    // Inline gripper: extends along +Z (the tool approach axis), jaws opening
+    // along X. Points straight down when the tool is vertical.
     const group = new THREE.Group();
-    group.rotation.z = -Math.PI / 2;
     const palmMat = new THREE.MeshStandardMaterial({ color: 0x252c30, roughness: 0.5, metalness: 0.1 });
     const fingerMat = new THREE.MeshStandardMaterial({ color: 0xe6ecef, roughness: 0.46, metalness: 0.12 });
 
-    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.018, 0.05), palmMat);
-    palm.position.z = 0.022;
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.045, 0.03), palmMat);
+    palm.position.z = 0.015;
     palm.castShadow = true;
     group.add(palm);
 
-    this.leftFinger = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, 0.068), fingerMat);
-    this.rightFinger = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, 0.068), fingerMat);
-    this.leftFinger.position.set(-0.025, -0.022, 0.058);
-    this.rightFinger.position.set(0.025, -0.022, 0.058);
+    const fingerGeo = new THREE.BoxGeometry(0.012, 0.03, 0.06);
+    this.leftFinger = new THREE.Mesh(fingerGeo, fingerMat);
+    this.rightFinger = new THREE.Mesh(fingerGeo, fingerMat);
+    this.leftFinger.position.set(-0.022, 0, 0.055);
+    this.rightFinger.position.set(0.022, 0, 0.055);
     this.leftFinger.castShadow = true;
     this.rightFinger.castShadow = true;
     group.add(this.leftFinger, this.rightFinger);

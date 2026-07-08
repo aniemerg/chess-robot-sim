@@ -52,7 +52,7 @@ scene.add(key);
 scene.add(new THREE.DirectionalLight(0xffffff, 0.3));
 
 const desk = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshStandardMaterial({ color: TABLE, roughness: 0.9 }));
-desk.position.z = -0.001; desk.receiveShadow = true;
+desk.position.z = -0.004; desk.receiveShadow = true; // clearly below the board (board bottom at z=0)
 scene.add(desk);
 
 const robot = new Xarm5Robot();
@@ -64,24 +64,25 @@ scene.add(boardGroup);
 const boardYaw = Math.atan2(V_RANK.y, V_RANK.x);
 const lightMat = new THREE.MeshStandardMaterial({ color: 0xe7e2d0, roughness: 0.6 });
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x2f6b43, roughness: 0.6 });
+// Board sits on the desk: border 0..0.006, tiles on top 0.005..0.009.
 const tileGeo = new THREE.BoxGeometry(SQUARE, SQUARE, 0.004);
 for (let f = 0; f < 8; f++) for (let r = 0; r < 8; r++) {
   const isLight = (f + r) % 2 === 1; // a1 (0,0) dark, standard
   const tile = new THREE.Mesh(tileGeo, isLight ? lightMat : darkMat);
   const c = squareCenter(f, r);
-  tile.position.set(c.x, c.y, 0.002);
+  tile.position.set(c.x, c.y, 0.007);
   tile.rotation.z = boardYaw;
   tile.receiveShadow = true;
   boardGroup.add(tile);
 }
-// border
 {
   const c = squareCenter(3.5, 3.5);
   const border = new THREE.Mesh(new THREE.BoxGeometry(SQUARE * 8 + 0.02, SQUARE * 8 + 0.02, 0.006),
     new THREE.MeshStandardMaterial({ color: 0xd8d1bb, roughness: 0.7 }));
-  border.position.set(c.x, c.y, 0.001); border.rotation.z = boardYaw; border.receiveShadow = true;
+  border.position.set(c.x, c.y, 0.003); border.rotation.z = boardYaw; border.receiveShadow = true;
   boardGroup.add(border);
 }
+const BOARD_TOP = 0.009;
 // labels
 function labelMesh(txt: string): THREE.Mesh {
   const cv = document.createElement("canvas"); cv.width = cv.height = 64;
@@ -91,8 +92,8 @@ function labelMesh(txt: string): THREE.Mesh {
     new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true }));
   m.rotation.z = boardYaw; return m;
 }
-for (let f = 0; f < 8; f++) { const c = squareCenter(f, -0.8); const l = labelMesh("abcdefgh"[f]); l.position.set(c.x, c.y, 0.004); boardGroup.add(l); }
-for (let r = 0; r < 8; r++) { const c = squareCenter(-0.8, r); const l = labelMesh(String(r + 1)); l.position.set(c.x, c.y, 0.004); boardGroup.add(l); }
+for (let f = 0; f < 8; f++) { const c = squareCenter(f, -0.8); const l = labelMesh("abcdefgh"[f]); l.position.set(c.x, c.y, BOARD_TOP + 0.001); boardGroup.add(l); }
+for (let r = 0; r < 8; r++) { const c = squareCenter(-0.8, r); const l = labelMesh(String(r + 1)); l.position.set(c.x, c.y, BOARD_TOP + 0.001); boardGroup.add(l); }
 
 // --- Cameras ----------------------------------------------------------------
 const boardCenter = squareCenter(3.5, 3.5);
@@ -144,7 +145,7 @@ async function load(): Promise<void> {
   queen = createPiece("queen", "white");
   queen.rotation.x = Math.PI / 2; // stand up in Z-up frame
   const fc = squareCenter(fromSq[0], fromSq[1]);
-  queen.position.set(fc.x, fc.y, 0);
+  queen.position.set(fc.x, fc.y, BOARD_TOP);
   scene.add(queen);
 
   // gripper transitions
@@ -183,7 +184,7 @@ function applyGripState(i: number): void {
   if (applied < 2 && detachFrame >= 0 && i >= detachFrame) {
     const tc = squareCenter(toSq[0], toSq[1]);
     scene.attach(queen);
-    queen.position.set(tc.x, tc.y, 0);
+    queen.position.set(tc.x, tc.y, BOARD_TOP);
     queen.rotation.set(Math.PI / 2, 0, 0);
     applied = 2;
   }
