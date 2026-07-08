@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>xArm5 replay — camera calibration</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #14171d; color: #e6e9ef; display: flex; }
+      #stage { padding: 16px; }
+      #view { position: relative; width: 640px; height: 480px; border: 1px solid #333; }
+      #cal { display: block; width: 640px; height: 480px; }
+      #ref { position: absolute; inset: 0; width: 640px; height: 480px; pointer-events: none; display: none; }
+      #panel { width: 300px; padding: 16px; background: #1b1f27; height: 100vh; overflow-y: auto; }
+      h1 { font-size: 15px; margin: 0 0 6px; }
+      .hint { font-size: 11px; color: #8b95a7; line-height: 1.5; }
+      .row { margin: 12px 0; }
+      .row label { font-size: 12px; color: #aab3c2; display: block; margin-bottom: 4px; }
+      input[type="range"] { width: 100%; }
+      button { padding: 6px 10px; font-size: 12px; background: #2a313d; color: #cdd4df; border: none; border-radius: 6px; cursor: pointer; }
+      button.on { background: #3f7fe0; color: #fff; }
+      textarea { width: 100%; height: 120px; background: #0c0f15; color: #9ad29a; border: 1px solid #333; border-radius: 6px; font: 11px monospace; padding: 8px; }
+      .val { color: #cdd4df; font-variant-numeric: tabular-nums; }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="view">
+        <canvas id="cal" width="640" height="480"></canvas>
+        <img id="ref" />
+      </div>
+      <p class="hint" style="width:640px">
+        This is the OVERHEAD camera. Left-drag = orbit, right-drag = pan, scroll = zoom.
+        Toggle the reference and match the board, then copy the config to me. Wrist
+        preview is bottom-right.
+      </p>
+    </div>
+    <div id="panel">
+      <h1>Overhead + wrist calibration</h1>
+      <div class="row">
+        <label>Reference overlay</label>
+        <button id="refToggle">Show reference</button>
+        <input id="refOpacity" type="range" min="0" max="100" value="50" />
+      </div>
+      <div class="row">
+        <label>Overhead FOV: <span id="fovVal" class="val"></span></label>
+        <input id="fov" type="range" min="20" max="80" step="0.5" />
+      </div>
+      <div class="row">
+        <label>Wrist cam tilt: <span id="wtVal" class="val"></span> (0=down the tool, higher=toward horizon)</label>
+        <input id="wt" type="range" min="0" max="80" step="1" />
+      </div>
+      <div class="row">
+        <label>Frame: <span id="frVal" class="val"></span></label>
+        <input id="fr" type="range" min="0" max="180" step="1" value="60" />
+      </div>
+      <div class="row">
+        <label>Config (copy this to me)</label>
+        <textarea id="out" readonly></textarea>
+      </div>
+    </div>
+    <script type="module" src="/src/xarm5/calibrate.ts"></script>
+  </body>
+</html>

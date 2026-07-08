@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { Xarm5Robot } from "./robot";
 import { createPiece } from "../pieces";
+import { squareCenter, buildBoard, BOARD_TOP } from "./board";
 
 /**
  * Trajectory replay: drive the official xArm5 along a recorded rollout `state`
@@ -10,18 +11,10 @@ import { createPiece } from "../pieces";
  * (mm) maps in 1:1 after mm->m. The board is placed from the data-derived pose.
  */
 
-const W = 640, H = 272, HALF = 320;
+// Composite matches the source: 32px caption over two 320x240 camera images.
+const W = 640, H = 272, HALF = 320, IMG_H = 240, CAP = H - IMG_H; // CAP = 32
+const OUTPUT_FPS = 30; // resample the ~14fps recorded states to smooth output
 
-// Board grid fitted from grasp/release anchors (see docs/rollout_data_analysis).
-// square_center(file,rank) in mm:  x = 1.61f + 56.81r + 251.49 ; y = -56.89f + 1.28r + 211.65
-const A1 = new THREE.Vector3(0.25149, 0.21165, 0);
-const U_FILE = new THREE.Vector3(0.00161, -0.05689, 0); // per file (a->h)
-const V_RANK = new THREE.Vector3(0.05681, 0.00128, 0); // per rank (1->8)
-const SQUARE = 0.0569;
-
-function squareCenter(file: number, rank: number): THREE.Vector3 {
-  return A1.clone().addScaledVector(U_FILE, file).addScaledVector(V_RANK, rank);
-}
 const parseSquare = (s: string): [number, number] => [s.charCodeAt(0) - 97, Number(s[1]) - 1];
 
 interface Frame { i: number; t: number; state: number[]; action: number[]; }
@@ -59,56 +52,23 @@ const robot = new Xarm5Robot();
 scene.add(robot.root);
 
 // --- Board (data pose) ------------------------------------------------------
-const boardGroup = new THREE.Group();
-scene.add(boardGroup);
-const boardYaw = Math.atan2(V_RANK.y, V_RANK.x);
-const lightMat = new THREE.MeshStandardMaterial({ color: 0xe7e2d0, roughness: 0.6 });
-const darkMat = new THREE.MeshStandardMaterial({ color: 0x2f6b43, roughness: 0.6 });
-// Board sits on the desk: border 0..0.006, tiles on top 0.005..0.009.
-const tileGeo = new THREE.BoxGeometry(SQUARE, SQUARE, 0.004);
-for (let f = 0; f < 8; f++) for (let r = 0; r < 8; r++) {
-  const isLight = (f + r) % 2 === 1; // a1 (0,0) dark, standard
-  const tile = new THREE.Mesh(tileGeo, isLight ? lightMat : darkMat);
-  const c = squareCenter(f, r);
-  tile.position.set(c.x, c.y, 0.007);
-  tile.rotation.z = boardYaw;
-  tile.receiveShadow = true;
-  boardGroup.add(tile);
-}
-{
-  const c = squareCenter(3.5, 3.5);
-  const border = new THREE.Mesh(new THREE.BoxGeometry(SQUARE * 8 + 0.02, SQUARE * 8 + 0.02, 0.006),
-    new THREE.MeshStandardMaterial({ color: 0xd8d1bb, roughness: 0.7 }));
-  border.position.set(c.x, c.y, 0.003); border.rotation.z = boardYaw; border.receiveShadow = true;
-  boardGroup.add(border);
-}
-const BOARD_TOP = 0.009;
-// labels
-function labelMesh(txt: string): THREE.Mesh {
-  const cv = document.createElement("canvas"); cv.width = cv.height = 64;
-  const g = cv.getContext("2d")!; g.fillStyle = "#20242b"; g.font = "bold 44px sans-serif";
-  g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(txt, 32, 34);
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.03),
-    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true }));
-  m.rotation.z = boardYaw; return m;
-}
-for (let f = 0; f < 8; f++) { const c = squareCenter(f, -0.8); const l = labelMesh("abcdefgh"[f]); l.position.set(c.x, c.y, BOARD_TOP + 0.001); boardGroup.add(l); }
-for (let r = 0; r < 8; r++) { const c = squareCenter(-0.8, r); const l = labelMesh(String(r + 1)); l.position.set(c.x, c.y, BOARD_TOP + 0.001); boardGroup.add(l); }
+scene.add(buildBoard());
 
 // --- Cameras ----------------------------------------------------------------
-const boardCenter = squareCenter(3.5, 3.5);
-const overhead = new THREE.PerspectiveCamera(42, HALF / H, 0.01, 50);
+// Overhead pose from PnP fit to the real base image (tools/pnp-overhead.mjs).
+const overhead = new THREE.PerspectiveCamera(42, HALF / IMG_H, 0.01, 50);
 overhead.up.set(0, 0, 1);
-overhead.position.set(boardCenter.x - 0.02, -0.62, 0.92);
-overhead.lookAt(boardCenter.x, boardCenter.y, 0.02);
+overhead.position.set(0.428, -0.1062, 1.0928);
+overhead.lookAt(0.4226, 0.0223, 0.2235);
 
 // Wrist camera — RIGIDLY ATTACHED to the wrist (endEffector frame). Since J5
 // locks the tool yaw, the endEffector orientation is constant in world, so the
 // camera holds a fixed orientation and only translates with the arm — exactly
 // like the real wrist cam. Mount pose is tunable (to be PnP-calibrated later).
 // Grip plane azimuth (world). The jaws (and the wrist camera mounted on them)
-// rotate with this. 90deg puts the jaws perpendicular to the +x default.
-robot.toolYawTarget = Math.PI / 2;
+// rotate with this. The jaw plane is symmetric, so -90deg keeps the same grip
+// plane as +90deg but flips the mounted camera 180deg into the correct view.
+robot.toolYawTarget = -Math.PI / 2;
 const wrist = new THREE.PerspectiveCamera(58, HALF / H, 0.005, 6);
 robot.endEffector.add(wrist);
 wrist.position.set(0, -0.075, -0.055); // local: beside + above the gripper
@@ -146,28 +106,46 @@ async function load(): Promise<void> {
   queen.position.set(fc.x, fc.y, BOARD_TOP);
   scene.add(queen);
 
-  // gripper transitions
-  grip = frames.map((f) => f.state[4]);
-  attachFrame = grip.findIndex((g) => g < 0.5);
-  detachFrame = grip.findIndex((g, i) => i > attachFrame + 2 && g > 0.5);
-
-  // precompute IK (warm-started for continuity)
-  let maxErr = 0, sumErr = 0;
+  // The recorded state stream is ~14fps with ~1/3 exact-duplicate frames (state
+  // logged slower than the camera). Dedupe to distinct keyframes, solve IK once
+  // per keyframe, then RESAMPLE by interpolating at a smooth output framerate.
+  const keys: { t: number; state: number[]; angles: number[] }[] = [];
+  let maxErr = 0, sumErr = 0, nKey = 0;
   for (let i = 0; i < frames.length; i++) {
     const s = frames[i].state;
+    const prev = keys[keys.length - 1];
+    const dup = prev && Math.abs(prev.state[0] - s[0]) < 1e-4 &&
+      Math.abs(prev.state[1] - s[1]) < 1e-4 && Math.abs(prev.state[2] - s[2]) < 1e-4;
+    if (dup && i !== frames.length - 1) continue;
     _t.set(s[0] / 1000, s[1] / 1000, s[2] / 1000);
     const r = robot.solveIK(_t, { tolerance: 0.004, maxIterations: 100 });
     robot.setAnglesDeg(r.angles);
-    solvedAngles.push(r.angles.slice());
+    keys.push({ t: frames[i].t, state: s, angles: r.angles.slice() });
     const e = robot.getTCP(new THREE.Vector3()).distanceTo(_t);
-    maxErr = Math.max(maxErr, e); sumErr += e;
+    maxErr = Math.max(maxErr, e); sumErr += e; nKey++;
   }
+
+  // Resample to OUTPUT_FPS with linear interpolation between keyframes.
+  const duration = frames[frames.length - 1].t;
+  const nOut = Math.round(duration * OUTPUT_FPS) + 1;
+  const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
+  let ki = 0;
+  for (let j = 0; j < nOut; j++) {
+    const t = Math.min(duration, j / OUTPUT_FPS);
+    while (ki < keys.length - 2 && keys[ki + 1].t < t) ki++;
+    const a = keys[ki], b = keys[Math.min(ki + 1, keys.length - 1)];
+    const u = b.t > a.t ? Math.min(1, Math.max(0, (t - a.t) / (b.t - a.t))) : 0;
+    solvedAngles.push(a.angles.map((v, c) => lerp(v, b.angles[c], u)));
+    grip.push(lerp(a.state[4], b.state[4], u));
+  }
+  attachFrame = grip.findIndex((g) => g < 0.5);
+  detachFrame = grip.findIndex((g, i) => i > attachFrame + 2 && g > 0.5);
+
   (window as unknown as Record<string, unknown>).REPLAY = {
-    totalFrames: frames.length,
-    fps: 14,
-    times: frames.map((f) => f.t),
+    totalFrames: solvedAngles.length,
+    fps: OUTPUT_FPS,
     renderFrame,
-    stats: { maxErr_mm: maxErr * 1000, meanErr_mm: (sumErr / frames.length) * 1000, attachFrame, detachFrame, task },
+    stats: { maxErr_mm: maxErr * 1000, meanErr_mm: (sumErr / nKey) * 1000, keyframes: nKey, attachFrame, detachFrame, task },
   };
   renderFrame(0);
 }
@@ -189,20 +167,25 @@ function applyGripState(i: number): void {
 }
 
 function renderComposite(): void {
+  // Two 320x240 views sit BELOW the caption band. WebGL viewport origin is
+  // bottom-left, so the images occupy y=0..IMG_H and the caption is the top CAP.
   renderer.setScissorTest(true);
-  renderer.setViewport(0, 0, HALF, H); renderer.setScissor(0, 0, HALF, H);
+  overhead.aspect = HALF / IMG_H; overhead.updateProjectionMatrix();
+  renderer.setViewport(0, 0, HALF, IMG_H); renderer.setScissor(0, 0, HALF, IMG_H);
   renderer.render(scene, overhead);
-  renderer.setViewport(HALF, 0, HALF, H); renderer.setScissor(HALF, 0, HALF, H);
-  wrist.aspect = HALF / H; wrist.updateProjectionMatrix();
+  wrist.aspect = HALF / IMG_H; wrist.updateProjectionMatrix();
+  renderer.setViewport(HALF, 0, HALF, IMG_H); renderer.setScissor(HALF, 0, HALF, IMG_H);
   renderer.render(scene, wrist);
   renderer.setScissorTest(false);
 
   ctx.clearRect(0, 0, W, H);
-  ctx.drawImage(glCanvas, 0, 0);
-  ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(HALF - 1, 0, 2, H);
-  ctx.fillStyle = "rgba(0,0,0,0.42)"; ctx.fillRect(0, 0, W, 24);
-  ctx.font = "600 15px system-ui, sans-serif"; ctx.fillStyle = "#f4f4f4"; ctx.textBaseline = "middle";
-  ctx.fillText(task, 8, 13);
+  // The GL render occupies the bottom IMG_H rows (WebGL origin is bottom-left);
+  // copy that strip (source y = CAP) down below the caption band.
+  ctx.drawImage(glCanvas, 0, CAP, W, IMG_H, 0, CAP, W, IMG_H);
+  ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(HALF - 1, CAP, 2, IMG_H);
+  ctx.fillStyle = "rgba(0,0,0,0.62)"; ctx.fillRect(0, 0, W, CAP);
+  ctx.font = "600 16px system-ui, sans-serif"; ctx.fillStyle = "#f4f4f4"; ctx.textBaseline = "middle";
+  ctx.fillText(task, 8, CAP / 2);
 }
 
 function renderFrame(i: number): string {
