@@ -102,19 +102,15 @@ overhead.up.set(0, 0, 1);
 overhead.position.set(boardCenter.x - 0.02, -0.62, 0.92);
 overhead.lookAt(boardCenter.x, boardCenter.y, 0.02);
 
-// Wrist camera. Because the tool yaw is fixed (never rotates), the real wrist
-// camera keeps a constant world orientation and only translates with the TCP.
-// So: a fixed straight-down orientation, repositioned above the TCP each frame.
-// Wrist view — STAND-IN until the real wrist mount is calibrated from the wrist
-// images: a board-fixed top-down that shows the whole board and the arm moving
-// across it (a1 bottom-left, like the real wrist frame).
-const wrist = new THREE.PerspectiveCamera(56, HALF / H, 0.005, 6);
-function placeWrist(): void {
-  wrist.up.set(1, 0, 0); // +x (toward rank 8) reads "up"; a1 ends bottom-left
-  wrist.position.set(boardCenter.x, boardCenter.y, 0.47);
-  wrist.lookAt(boardCenter.x, boardCenter.y, 0);
-}
-placeWrist();
+// Wrist camera — RIGIDLY ATTACHED to the wrist (endEffector frame). Since J5
+// locks the tool yaw, the endEffector orientation is constant in world, so the
+// camera holds a fixed orientation and only translates with the arm — exactly
+// like the real wrist cam. Mount pose is tunable (to be PnP-calibrated later).
+robot.toolYawTarget = 0; // gripper jaw azimuth (world); tune to the real gripper
+const wrist = new THREE.PerspectiveCamera(58, HALF / H, 0.005, 6);
+robot.endEffector.add(wrist);
+wrist.position.set(0, -0.075, -0.055); // local: beside + above the gripper
+wrist.rotation.set(Math.PI - 0.42, 0, 0); // look down, tilted toward the gripper/board
 
 // --- Episode setup ----------------------------------------------------------
 const params = new URLSearchParams(location.search);
@@ -213,7 +209,6 @@ function renderFrame(i: number): string {
   robot.setAnglesDeg(solvedAngles[f]);
   robot.setGripper(grip[f]);
   robot.root.updateMatrixWorld(true);
-  placeWrist();
   renderComposite();
   return out.toDataURL("image/png");
 }

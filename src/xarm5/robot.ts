@@ -46,6 +46,14 @@ export class Xarm5Robot {
   readonly gripper: THREE.Group;
   readonly tcp: THREE.Object3D; // controlled point (grasp point between fingers)
 
+  /**
+   * Fixed world azimuth (radians) of the gripper jaw axis. The 5-DOF arm keeps
+   * TCP yaw constant (data yaw = 0), so J5 counter-rotates J1 to hold the grip
+   * plane fixed relative to the board. Set per replication to match the real
+   * gripper orientation.
+   */
+  toolYawTarget = 0;
+
   private leftFinger!: THREE.Mesh;
   private rightFinger!: THREE.Mesh;
   private gripOpen = 1;
@@ -194,7 +202,6 @@ export class Xarm5Robot {
     const tolerance = opts.tolerance ?? 0.006;
     const maxIterations = opts.maxIterations ?? 120;
     let best = this.getAnglesDeg();
-    let bestError = Infinity;
     let bestScore = Infinity;
 
     for (let iter = 0; iter < maxIterations; iter++) {
@@ -226,12 +233,51 @@ export class Xarm5Robot {
       const score = error + this.gripperVerticalError() * VERTICAL_WEIGHT;
       if (score < bestScore) {
         bestScore = score;
-        bestError = error;
         best = this.getAnglesDeg();
       }
-      if (error <= tolerance) return { angles: best, error, success: true, iterations: iter + 1 };
+      if (error <= tolerance) break;
     }
-    return { angles: best, error: bestError, success: bestError <= 0.03, iterations: maxIterations };
+    // Lock the grip plane: J5 counter-rotates so the jaw azimuth is fixed. The
+    // TCP lies on the J5 axis, so this does not change position or verticality.
+    this.setAnglesDeg(best);
+    this.alignToolYaw(this.toolYawTarget);
+    best = this.getAnglesDeg();
+    const error = this.getTCP(this._v2).distanceTo(target);
+    return { angles: best, error, success: error <= tolerance * 1.5, iterations: maxIterations };
+  }
+
+  /** World azimuth (radians) of the jaw axis (gripper local +X projected to XY). */
+  private jawAzimuth(): number {
+    this.gripper.getWorldQuaternion(this._q);
+    this._v1.set(1, 0, 0).applyQuaternion(this._q);
+    return Math.atan2(this._v1.y, this._v1.x);
+  }
+
+  private setJoint5(deg: number): void {
+    const a = this.getAnglesDeg();
+    a[4] = deg;
+    this.setAnglesDeg(a);
+  }
+
+  /** Set J5 so the jaw azimuth equals `target` (radians). */
+  alignToolYaw(target: number): void {
+    const angDiff = (a: number, b: number) => {
+      let d = a - b;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return d;
+    };
+    const j0 = this.joints[4].valueDeg;
+    const a0 = this.jawAzimuth();
+    this.setJoint5(j0 + 10);
+    const slope = angDiff(this.jawAzimuth(), a0) / 10; // rad azimuth per deg J5
+    this.setJoint5(j0);
+    if (Math.abs(slope) < 1e-6) return;
+    let j5 = j0 + angDiff(target, a0) / slope;
+    // wrap toward the reachable range
+    while (j5 > 360) j5 -= 360;
+    while (j5 < -360) j5 += 360;
+    this.setJoint5(j5);
   }
 
   private refineWristVertical(target: THREE.Vector3): void {
