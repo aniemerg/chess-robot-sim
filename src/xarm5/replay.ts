@@ -111,6 +111,7 @@ const wrist = new THREE.PerspectiveCamera(58, HALF / H, 0.005, 6);
 robot.endEffector.add(wrist);
 wrist.position.set(0, -0.075, -0.055); // local: beside + above the gripper
 wrist.rotation.set(Math.PI - 0.42, 0, 0); // look down, tilted toward the gripper/board
+wrist.rotateZ(Math.PI / 2); // roll the image 90 deg clockwise
 
 // --- Episode setup ----------------------------------------------------------
 const params = new URLSearchParams(location.search);
