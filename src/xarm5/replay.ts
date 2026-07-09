@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { Xarm5Robot } from "./robot";
 import { createPiece } from "../pieces";
-import { squareCenter, buildBoard, BOARD_TOP } from "./board";
+import { squareCenter, buildBoard, BOARD_TOP, makeFloorTexture } from "./board";
 import { XEPISODES } from "./episodes";
 
 /**
@@ -47,7 +47,7 @@ key.shadow.radius = 3;
 scene.add(key);
 scene.add(new THREE.DirectionalLight(0xffffff, 0.3));
 
-const desk = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshStandardMaterial({ color: TABLE, roughness: 0.9 }));
+const desk = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 0.9 }));
 desk.position.z = -0.004; desk.receiveShadow = true;
 scene.add(desk);
 
@@ -131,16 +131,23 @@ async function load(): Promise<void> {
   let px = 0, py = 0;
   if (ep.from) { const [f, r] = parseSquare(ep.from); const c = squareCenter(f, r); px = c.x * 1000; py = c.y * 1000; }
   else if (ep.atMM) { px = ep.atMM[0]; py = ep.atMM[1]; }
-  let bestAi = -1, bestD = Infinity;
+  // Grasp = the LOWEST-Z closing frame near the piece (the arm lifts straight up
+  // afterward, so many frames are horizontally over the square — take the lowest).
+  let bestAi = -1, bestZ = Infinity;
   for (let i = 0; i < keys.length; i++) {
-    if (g[i] < closeT) {
-      const d = Math.hypot(keys[i].state[0] - px, keys[i].state[1] - py);
-      if (d < bestD) { bestD = d; bestAi = i; }
+    if (g[i] < closeT && Math.hypot(keys[i].state[0] - px, keys[i].state[1] - py) < 70 && keys[i].state[2] < bestZ) {
+      bestZ = keys[i].state[2];
+      bestAi = i;
     }
   }
-  if (bestAi >= 0 && bestD < 120) tAttach = keys[bestAi].t; // grasped within 12cm of the piece
+  if (bestAi >= 0) tAttach = keys[bestAi].t;
   if (ep.to && bestAi >= 0) {
-    const di = g.findIndex((v, idx) => idx > bestAi + 1 && v > openT);
+    // Release = the LOWEST-Z frame after the grasp where the gripper reopens
+    // (the placement contact), so the piece is set down, not dropped mid-air.
+    let di = -1, dz = Infinity;
+    for (let i = bestAi + 1; i < keys.length; i++) {
+      if (g[i] > openT && keys[i].state[2] < dz) { dz = keys[i].state[2]; di = i; }
+    }
     if (di >= 0) tDetach = keys[di].t;
   }
 
@@ -163,33 +170,45 @@ async function load(): Promise<void> {
     totalFrames: solvedAngles.length,
     fps: OUTPUT_FPS,
     renderFrame,
+    probe,
     stats: { maxErr_mm: maxErr * 1000, meanErr_mm: (sumErr / nKey) * 1000, keyframes: nKey, attachFrame, detachFrame, task },
   };
   renderFrame(0);
 }
 
+// The held piece is NOT rigidly parented; each frame it is placed at the
+// fingertips (x,y from the TCP) with its base clamped to the surface, so it can
+// never be dragged through the board/floor. graspOffset = grasp-moment TCP
+// height above the surface (the height on the piece the fingers grab).
 const _tcp = new THREE.Vector3();
-let applied = 0; // 0=none, 1=attached, 2=detached
-function applyGripState(i: number): void {
+let applied = 0; // 0=before grasp, 1=held, 2=released
+let graspOffset = 0.045;
+function updatePiece(f: number): void {
   if (!piece) return;
-  if (applied < 1 && attachFrame >= 0 && i >= attachFrame) {
-    // Center the piece between the fingertips (upright, base on the surface),
-    // then attach — so it's held correctly (no float/offset/clipping).
+  if (applied < 1 && attachFrame >= 0 && f >= attachFrame) {
     robot.getTCP(_tcp);
-    piece.position.set(_tcp.x, _tcp.y, tableZ);
-    piece.rotation.set(Math.PI / 2, 0, 0);
-    piece.updateMatrixWorld(true);
-    robot.gripper.attach(piece); // preserves the (now correct) world transform
+    graspOffset = _tcp.z - tableZ;
     applied = 1;
   }
-  if (applied < 2 && detachFrame >= 0 && ep.to && i >= detachFrame) {
-    const [f, r] = parseSquare(ep.to);
-    const c = squareCenter(f, r);
-    scene.attach(piece);
+  if (applied < 2 && detachFrame >= 0 && ep.to && f >= detachFrame) {
+    const [ff, rr] = parseSquare(ep.to);
+    const c = squareCenter(ff, rr);
     piece.position.set(c.x, c.y, tableZ);
     piece.rotation.set(Math.PI / 2, 0, 0);
     applied = 2;
   }
+  if (applied === 1) {
+    robot.getTCP(_tcp);
+    piece.position.set(_tcp.x, _tcp.y, Math.max(tableZ, _tcp.z - graspOffset));
+    piece.rotation.set(Math.PI / 2, 0, 0);
+  }
+}
+
+function poseFrame(f: number): void {
+  robot.setAnglesDeg(solvedAngles[f]);
+  robot.setGripper(grip[f]);
+  robot.root.updateMatrixWorld(true);
+  updatePiece(f);
 }
 
 function renderComposite(): void {
@@ -211,13 +230,24 @@ function renderComposite(): void {
 }
 
 function renderFrame(i: number): string {
-  const f = Math.max(0, Math.min(solvedAngles.length - 1, i));
-  applyGripState(f);
-  robot.setAnglesDeg(solvedAngles[f]);
-  robot.setGripper(grip[f]);
-  robot.root.updateMatrixWorld(true);
+  poseFrame(Math.max(0, Math.min(solvedAngles.length - 1, i)));
   renderComposite();
   return out.toDataURL("image/png");
+}
+
+// Debug probe: pose frame i and report actual world positions (no render).
+function probe(i: number): Record<string, unknown> {
+  const f = Math.max(0, Math.min(solvedAngles.length - 1, i));
+  poseFrame(f);
+  robot.getTCP(_tcp);
+  const pb = piece ? piece.getWorldPosition(new THREE.Vector3()) : null;
+  const fl = robot.gripper.getWorldPosition(new THREE.Vector3());
+  return {
+    i: f, grip: +grip[f].toFixed(3), applied,
+    tcp: [_tcp.x, _tcp.y, _tcp.z].map((v) => +(v * 1000).toFixed(1)),
+    piece: pb ? [pb.x, pb.y, pb.z].map((v) => +(v * 1000).toFixed(1)) : null,
+    gripper: [fl.x, fl.y, fl.z].map((v) => +(v * 1000).toFixed(1)),
+  };
 }
 
 load();

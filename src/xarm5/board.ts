@@ -17,6 +17,42 @@ export function squareCenter(file: number, rank: number, out = new THREE.Vector3
 }
 export const boardCenter = squareCenter(3.5, 3.5);
 
+/**
+ * Procedural wood-grain floor texture — varies across the whole surface (so
+ * orientation and motion are readable) without a grid.
+ */
+export function makeFloorTexture(): THREE.CanvasTexture {
+  const N = 512;
+  const c = document.createElement("canvas");
+  c.width = c.height = N;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#c8a678";
+  g.fillRect(0, 0, N, N);
+  // Vertical grain: thin streaks with a slow wave + noise.
+  for (let x = 0; x < N; x++) {
+    const wave = Math.sin(x * 0.06) + Math.sin(x * 0.017 + 1.3) * 0.6;
+    const shade = wave * 0.5 + (Math.random() - 0.5) * 1.1;
+    const a = Math.min(0.22, Math.abs(shade) * 0.16);
+    g.fillStyle = shade > 0 ? `rgba(96,64,34,${a})` : `rgba(226,198,158,${a})`;
+    g.fillRect(x, 0, 1, N);
+  }
+  // A few darker grain streaks / knots for large-scale variation.
+  for (let k = 0; k < 30; k++) {
+    const x = Math.random() * N;
+    g.strokeStyle = `rgba(80,52,26,${0.05 + Math.random() * 0.08})`;
+    g.lineWidth = 1 + Math.random() * 3;
+    g.beginPath();
+    g.moveTo(x, 0);
+    for (let y = 0; y <= N; y += 32) g.lineTo(x + Math.sin(y * 0.02 + k) * 8, y);
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2.5, 2.5); // ~1.6m per tile over the 4m table
+  tex.anisotropy = 8;
+  return tex;
+}
+
 function labelMesh(txt: string): THREE.Mesh {
   const cv = document.createElement("canvas");
   cv.width = cv.height = 64;
