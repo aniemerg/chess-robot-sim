@@ -8,3 +8,6 @@ replicas/
 public/ref_*.png
 rollouts/
 public/rollouts/
+
+# synthetic dataset output
+synth/

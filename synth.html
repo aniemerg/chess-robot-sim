@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>xArm5 synthetic episode</title>
+    <style>
+      body { margin: 0; background: #14171c; color: #cfd4da; font: 13px system-ui, sans-serif; }
+      #wrap { display: flex; gap: 12px; padding: 12px; align-items: flex-start; }
+      canvas { image-rendering: pixelated; border: 1px solid #333; width: 320px; height: 240px; }
+      pre { margin: 0; max-width: 520px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <canvas id="out" width="320" height="240"></canvas>
+      <pre id="info">generating…</pre>
+    </div>
+    <script type="module">
+      import "/src/synth/generate.ts";
+      const tick = () => {
+        const S = window.SYNTH;
+        if (S && S.ready) {
+          document.getElementById("info").textContent = JSON.stringify(
+            { scenario: S.scenario, seed: S.seed, task: S.episode.task, ...S.stats, num_frames: S.numFrames },
+            null, 2
+          );
+        } else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    </script>
+  </body>
+</html>
