@@ -174,11 +174,17 @@ larger swings for generalization). Axes:
 - **Lighting**: number, direction, intensity, color temperature, shadow
   softness, ambient level.
 - **Cameras**: overhead pose (position, target, fov, roll) jitter around the
-  calibrated setups A/B/C; **wrist mount** offset/tilt/roll jitter.
+  calibrated setups A/B/C — it is an *external* camera whose pose genuinely
+  varies per setup. The **wrist camera is a fixed hardware mount** — its
+  orientation/offset are constant across all real episodes, so we do **NOT**
+  randomize the wrist camera (doing so would teach the policy a wrist-view
+  variation that does not exist in reality).
 - **Background**: 3D clutter objects (mugs, phone, keyboard, books) placed off
   the workspace, and/or an environment backdrop — to avoid a plain infinite bg.
-- **Robot**: base position jitter (small), gripper finger geometry/width,
-  optional link color.
+- **Robot**: *appearance* only — link color/material, optional wear. The base
+  pose, gripper finger geometry/width, and wrist-camera mount are **fixed
+  hardware** and are held constant (randomizing fixed geometry that the policy
+  relies on for spatial grounding would hurt, not help).
 - **Motion**: speed, travel/grasp heights, dwell times, yaw ∈ {0,90}, approach
   arc — small jitter within the measured spread.
 - **Camera/sensor**: jpg quality, mild blur/noise/exposure (to match webcam look).

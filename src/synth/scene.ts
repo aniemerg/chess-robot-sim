@@ -142,6 +142,7 @@ export function sampleSceneRandomization(
       fillIntensity: gauss(rng, 0.3, 0.06),
     },
     floorRoughness: uniform(rng, 0.82, 0.95),
+    // Overhead is an EXTERNAL camera whose pose varies per real setup — jitter it.
     overhead: {
       pos: [
         base.overhead.pos[0] + gauss(rng, 0, 0.01),
@@ -155,7 +156,9 @@ export function sampleSceneRandomization(
       ],
       fov: base.overhead.fov + gauss(rng, 0, 0.6),
     },
-    wristTilt: base.wristTilt + gauss(rng, 0, 0.5),
+    // The wrist camera is a FIXED hardware mount — its orientation is constant
+    // across all real episodes, so it must NOT be randomized.
+    wristTilt: base.wristTilt,
     boardOffset: { x: gauss(rng, 0, 0.002), y: gauss(rng, 0, 0.002), yaw: gauss(rng, 0, 0.4) },
   };
 }
