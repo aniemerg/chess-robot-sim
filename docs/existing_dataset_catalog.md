@@ -92,4 +92,4 @@ Dataset-level `meta.json` (fps 15, cameras, state/action names, image size) and
 
 This narrowness is precisely the gap the **synthetic data plan**
 (`docs/synthetic_data_plan.md`) targets: keep this exact motion style, but
-broaden pieces, squares, task types, and visual variety by ~10×.
+broaden pieces, squares, task types, and visual variety.

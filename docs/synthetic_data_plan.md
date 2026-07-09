@@ -1,45 +1,60 @@
 # Synthetic Trajectory Generation — Plan
 
-Goal: generate **~10× the recorded data** (~8,000 synthetic episodes) that is as
-**in-distribution** as possible to the real Magnus rollouts, to serve as a
-**mid-train** augmentation before final training on the real episodes. Every
+Goal: build a **pipeline** that generates synthetic xArm5 episodes that are as
+**in-distribution** as possible with the real Magnus rollouts (see
+`docs/existing_dataset_catalog.md` and `docs/full_dataset_analysis.md`), to serve
+as **mid-train** augmentation before final training on the real episodes. Every
 generated episode carries a **manifest** recording every randomized variable, so
 we can run ablations and slice results later.
 
+We are **starting with a few scenarios** to prove the pipeline end-to-end. Target
+counts, family splits, and the render compute story are deliberately **out of
+scope for now** — we'll set those once a handful of episodes look right.
+
 Decisions locked (this doc builds on them):
 - Engine: **Three.js / kinematic** (reuse the existing xArm5 pipeline; no physics).
-- Fidelity: **stair-stepped `state`** (matches the recorder), **smooth video**.
-- Scope: **parametric moves + pickups, any piece** is the core; complex
-  Claude-in-the-loop scenarios layered on.
+- Output: **folders of per-frame JPGs** (base + wrist) — *not* video files —
+  plus `frames.jsonl` in the recorder's format. `state` is **sample-held**
+  (updates ~every 3rd frame); the rendered image advances **every** frame.
+- Datasets: emit as new **`synth_*`** datasets, mirroring the real layout.
+- Pieces: **source 3D piece-model sets from online libraries** where possible
+  (plus procedural fallbacks); each model id + license logged per episode.
 - Randomization: **exhaustive**, but **meticulously logged** per episode.
-
-References: `docs/full_dataset_analysis.md` (measured motion profile + logging).
 
 ---
 
 ## 1. Output format (must match the recorder exactly)
 
-Per synthetic episode, mirror the real dataset layout:
+Per synthetic episode, mirror the real dataset layout — **a folder of frames, not
+a video**:
 ```
-<dataset>/episodes/episode_XXXXXX/
+synth_<name>/episodes/episode_XXXXXX/
   episode.json     # task, num_frames, success, duration_s
-  frames.jsonl     # per frame: i, t, state[5], action[5]   (STAIR-STEPPED)
-  base/000000.jpg  # overhead, 320x240   (SMOOTH true pose each frame)
-  wrist/000000.jpg # wrist,    320x240   (SMOOTH)
+  frames.jsonl     # per frame: i, t, state[5], action[5]   (state SAMPLE-HELD)
+  base/000000.jpg  # overhead, 320x240   (rendered at the true pose FOR THAT FRAME)
+  wrist/000000.jpg # wrist,    320x240
   manifest.json    # NEW: every sampled scenario + randomization variable
 ```
 Plus dataset-level `meta.json` and a recomputed `stats.json`.
 
-### The stair-step / smooth split (key)
-- The **true motion** is a smooth waypoint trajectory (§3), sampled at the camera
-  rate (~13.7 fps; use the recorded per-frame Δt distribution).
-- **Images** render the *true* pose at every frame → smooth video.
-- **`state[i]`** is a **sample-and-hold** of the true pose: the state only
-  "updates" every ~3 frames (run-lengths 2–3, occasionally more; ~4.5 Hz
-  effective), holding the last updated value in between — reproducing the
-  recorder's polling artifact. `action[i] = state[i+1]` (also quantized).
-- Result: given only `frames.jsonl`, synthetic ≈ real; given the video, motion
-  is smooth like real. A model can't trivially learn "smooth ⇒ synthetic."
+### Frames vs. state — how they relate (measured, not assumed)
+There is no "video." We generate a folder of still frames at the camera rate
+(~13.7 fps; use the recorded per-frame Δt spread). Two distinct things per frame:
+
+- **The image** is rendered at the arm's **true pose for that frame** — the pose
+  advances every frame, so consecutive JPGs show incremental motion. Verified in
+  the real data: consecutive `base/*.jpg` differ by ~1.8–2.7 mean pixel value
+  **even across frames where the logged state was identical** — i.e. the real
+  camera is continuous while state is polled slower. Our frames must do the same,
+  or "runs of identical images" would be a trivial synthetic tell.
+- **`state[i]`** is a **sample-and-hold** of that true pose: it only "updates"
+  ~every 3rd frame (run-lengths 2–3, occasionally more; ~4.5 Hz effective),
+  holding the last updated value in between — reproducing the recorder's polling
+  artifact. `action[i] = state[i+1]` (also quantized).
+
+So: read only `frames.jsonl` and synthetic ≈ real (same stair-stepped state);
+look at the frames and the motion is continuous like real. Neither channel
+reveals "synthetic."
 
 ---
 
@@ -68,30 +83,34 @@ lift to travel(318) → traverse → descend to place → open → lift → retr
 The planner emits waypoints, interpolates at the target speed (trapezoid-ish but
 near-constant velocity to match the data), times the gripper open/close to the
 low-z dwells, and blends yaw over the approach/retract. IK per frame via the
-existing `Xarm5Robot` (grasp offset already handled correctly).
+existing `Xarm5Robot` (grasp offset already handled correctly). The **true**
+per-frame poses feed the renderer; a **sample-held** copy feeds `frames.jsonl`.
 
 ---
 
-## 3. Scenario & task taxonomy (how we reach 10×)
+## 3. Scenario & task types (what we can generate)
 
-The real set is ~793 episodes of essentially two templates. We widen along
-**pieces × locations × task-type × randomization**. Proposed families:
+The real set is ~793 episodes of essentially two templates (all *moves* are the
+white queen; piece variety appears only in 45 pickups — see
+`docs/existing_dataset_catalog.md`). The synthetic pipeline widens along
+**pieces × locations × task-type × randomization**. Task families, roughly in
+build order (no target proportions yet — we'll tune the mix later):
 
-**A. Parametric core (algorithmic, the bulk — target ~70%)**
+**A. Parametric core (algorithmic — build first)**
 1. `move the {color} {piece} from {A} to {B}` — all 12 piece identities, all
    from/to squares. Optionally a few distractor pieces on the board.
 2. `pick up the {color} {piece}` — any piece, board or bare-table, varied
-   location (like chess_all pickups).
+   location (like the chess_all pickups).
 
-**B. Compound (algorithmic — target ~20%)**
+**B. Compound (algorithmic — later)**
 3. `move … then move …` (2–3 chained moves in one episode).
 4. Captures: move onto an occupied square, remove the captured piece
    (attach/despawn), matching a "take" motion.
 5. Tidy/sort: move N pieces off the board / into a group.
 
-**C. Claude-in-the-loop scenarios (target ~10%)**
-6. `reset the chessboard` — Claude proposes an interesting scrambled start
-   position and the standard target, then we sequence the many moves.
+**C. Claude-in-the-loop scenarios (later)**
+6. `reset the chessboard` — Claude proposes a scrambled start position + the
+   standard target, then we sequence the moves.
 7. `set up position <FEN / description>` — Claude picks piece placements.
 8. Semantically-guided clutter/backgrounds — Claude proposes plausible desk
    scenes (mugs, phones, keyboards — like the real backgrounds).
@@ -104,6 +123,11 @@ Collision note: travel height (318) is far above pieces (≤76), so traverses ar
 collision-free; only dense placements need a reachability/adjacency check on the
 descend — flag & re-sample if the grasp column is blocked.
 
+**First milestone scenarios (the "few"):** one white-queen `move` on a board
+(the case we've already replicated), one `pick up` of a non-queen piece on the
+bare table, and the same move with yaw=90° — enough to exercise every stage of
+the pipeline (planner, IK, both cameras, state hold, manifest, validation).
+
 ---
 
 ## 4. Architecture
@@ -113,11 +137,11 @@ scenario generator ──► scene spec + manifest
        │                     │
        │             (algorithmic OR Claude-in-the-loop)
        ▼                     ▼
-   motion planner ──► smooth TCP trajectory (waypoints @ measured speed)
+   motion planner ──► true TCP trajectory (waypoints @ measured speed)
        ▼
    Xarm5Robot IK (per frame) ──► joint angles
        ▼
-   randomized renderer ──► base.jpg + wrist.jpg per frame  (smooth)
+   randomized renderer ──► base.jpg + wrist.jpg per frame (true per-frame pose)
        ▼
    logger ──► frames.jsonl (sample-held state), episode.json, manifest.json
 ```
@@ -132,12 +156,17 @@ scenario generator ──► scene spec + manifest
 ## 5. Domain randomization catalog (exhaustive; all logged in manifest)
 
 Two tiers per episode (tier is itself logged): **in-distribution jitter** (most
-episodes, small, near real) and **wide augmentation** (a configurable fraction,
+episodes, small, near real) and **wide augmentation** (a fraction of episodes,
 larger swings for generalization). Axes:
 
-- **Pieces**: color/shade (continuous), material roughness/metalness, scale,
-  and **geometry** — procedural lathe variants now; a library of off-the-shelf
-  GLB Staunton/novelty sets later (each model id logged).
+- **Pieces**: color/shade (continuous), material roughness/metalness, scale, and
+  **geometry** — a library of **off-the-shelf 3D sets sourced online** (Staunton
+  + novelty), each normalized to a common up-axis/scale and logged by model id +
+  license; procedural lathe variants as a fallback / extra diversity. Candidate
+  sources: **poly.pizza** (Google Poly archive, CC-BY, has low-poly chess),
+  **Sketchfab** (filter to CC/downloadable), **Free3D / TurboSquid** free tiers,
+  and printable STL sets (Thingiverse/Printables) converted to GLB. Store vetted
+  models under `assets/pieces/<set>/` with a `LICENSE`/attribution file.
 - **Board**: light/dark colors, square size, border, coordinate labels on/off,
   surface wear/texture, slight in-plane pose jitter.
 - **Table/floor**: texture family (wood / stone / cloth / gradient / plain) and
@@ -154,7 +183,7 @@ larger swings for generalization). Axes:
   arc — small jitter within the measured spread.
 - **Camera/sensor**: jpg quality, mild blur/noise/exposure (to match webcam look).
 
-**Manifest schema** (per episode): `{ seed, dataset, task, template, pieces:[{id,color,geom,square/xy}], scene:{board, clutter[...]}, motion:{yaw, travelZ, graspZ, speed, dwell...}, cameras:{overhead, wrist}, lighting:{...}, textures:{...}, tier, engine_version }`. Flat, queryable, one row per episode for ablation slicing.
+**Manifest schema** (per episode): `{ seed, dataset, task, template, pieces:[{id,color,geom,model,license,square/xy}], scene:{board, clutter[...]}, motion:{yaw, travelZ, graspZ, speed, dwell...}, cameras:{overhead, wrist}, lighting:{...}, textures:{...}, tier, engine_version }`. Flat, queryable, one row per episode for ablation slicing.
 
 ---
 
@@ -165,49 +194,53 @@ Automated, run over each synthetic batch and compared to the real distributions:
   dwell fraction, gripper values, yaw split, home-pose spread — KS/overlap vs
   real. Gate the batch if any drifts out of the real spread.
 - **State quantization**: hold-run-length histogram matches the real (2–3).
+- **Frame continuity**: consecutive-frame image diff is non-zero during motion
+  (no accidental duplicate/held frames), matching the real ~1.8–2.7 spread.
 - **Reachability/IK**: TCP-follow error < a few mm; no IK failures.
-- **Visual spot-checks**: sample composites vs real (as we've been doing).
+- **Visual spot-checks**: sample frames vs real (as we've been doing).
 - **Trajectory-space viz**: overlay synthetic vs real TCP paths.
 
 ---
 
-## 7. Scale & compute (phased)
+## 7. Approach: start small, then widen
 
-Rendering ~8,000 × ~180 frames × 2 cameras ≈ **~2.9M images** — the real cost.
-- **Phase 0 — proof (≈50 episodes)**: end-to-end for the parametric core; verify
-  format + stair-step/smooth split + validation harness + manifest.
-- **Phase 1 — core at scale (few k)**: parametric moves + pickups, any piece,
-  full randomization. Parallelize headless rendering (worker pool; each worker a
-  headless context). Estimate throughput, decide **local vs cloud**.
-- **Phase 2 — compound + Claude-in-the-loop** to fill the 10× and add diversity.
-- **Phase 3 — full randomization sweep + validation + packaging**.
+Deliberately no scale/compute plan yet — that's premature. Sequence:
 
-Open compute decision: single-machine (Mac, over days) vs a cloud render farm —
-depends on the throughput measured in Phase 1.
+1. **A few scenarios, end-to-end.** Generate the first-milestone scenarios (§3):
+   one queen move, one bare-table pickup, one yaw=90° move. Confirm the output
+   format, the frame-vs-held-state split, the manifest, and the validation
+   harness all work and look right against real episodes.
+2. **Widen the parametric core.** Any piece, any from/to, full randomization —
+   still algorithmic. Review distributions vs real.
+3. **Compound + Claude-in-the-loop** scenarios for task/scene diversity.
+4. **Only then** decide counts, family mix, and render compute (local vs cloud)
+   based on measured per-episode cost and how the reviewed episodes look.
 
 ---
 
 ## 8. Milestones
 
 1. `src/synth/` scene+render module refactor from `src/xarm5/*`.
-2. Motion planner (waypoint → smooth TCP) reproducing the measured profile;
+2. Motion planner (waypoint → true TCP) reproducing the measured profile;
    validate its stats match real.
 3. State sample-and-hold + logger (frames.jsonl / episode.json / manifest.json)
    in the exact recorder format.
-4. Randomization engine + manifest; scenario generator (parametric core).
-5. Validation harness (distribution matching).
-6. Phase-0 proof batch (~50), reviewed.
-7. Scale + compound + Claude-in-the-loop scenarios.
+4. Piece-asset sourcing: vet a couple of online sets, normalize + load as GLB.
+5. Randomization engine + manifest; scenario generator (parametric core).
+6. Validation harness (distribution + frame-continuity matching).
+7. **First few scenarios** rendered and reviewed against real episodes.
+8. Widen the core; later add compound + Claude-in-the-loop.
 
 ---
 
 ## 9. Open decisions to confirm
 
-1. **Target counts / split** across families A/B/C (I proposed 70/20/10).
-2. **Compute**: local vs cloud for the ~3M-image render (decide after Phase-1
-   throughput).
-3. **Piece-model library**: procedural-only to start, or source GLB sets now?
-4. **Dataset identity**: emit as new `synth_*` datasets, or mix into the real
-   dataset layout for training?
-5. **Randomization ranges**: I'll propose concrete numeric ranges per axis in the
-   implementation; confirm the "wide augmentation" fraction (e.g. 15–25%).
+1. **Piece sources**: OK to pull CC-licensed GLB sets from poly.pizza / Sketchfab
+   (attribution kept in-repo), or do you want a specific/curated set?
+2. **Wide-augmentation tier**: keep a two-tier (near-real jitter vs wide swings)
+   scheme; what rough fraction goes "wide" (can defer until we see a few).
+3. **Board realism**: the real boards are fairly plain — how far to push board
+   texture/wear randomization vs staying close to the real look.
+
+(Counts/splits and render compute intentionally deferred until the first few
+scenarios are reviewed.)
