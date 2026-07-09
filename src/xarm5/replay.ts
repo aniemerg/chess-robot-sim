@@ -2,22 +2,25 @@ import * as THREE from "three";
 import { Xarm5Robot } from "./robot";
 import { createPiece } from "../pieces";
 import { squareCenter, buildBoard, BOARD_TOP } from "./board";
+import { XEPISODES } from "./episodes";
 
 /**
  * Trajectory replay: drive the official xArm5 along a recorded rollout `state`
  * path (per-frame IK to the TCP + gripper), render the overhead|wrist composite.
- *
- * Everything is in the ROS arm-base frame (Z up, meters), so the recorded state
- * (mm) maps in 1:1 after mm->m. The board is placed from the data-derived pose.
+ * ROS arm-base frame (Z up, meters); recorded state (mm) maps 1:1. Per-episode
+ * scene + cameras come from episodes.ts.
  */
 
 // Composite matches the source: 32px caption over two 320x240 camera images.
-const W = 640, H = 272, HALF = 320, IMG_H = 240, CAP = H - IMG_H; // CAP = 32
+const W = 640, H = 272, HALF = 320, IMG_H = 240, CAP = H - IMG_H;
 const OUTPUT_FPS = 30; // resample the ~14fps recorded states to smooth output
 
 const parseSquare = (s: string): [number, number] => [s.charCodeAt(0) - 97, Number(s[1]) - 1];
+interface Frame { t: number; state: number[]; }
 
-interface Frame { i: number; t: number; state: number[]; action: number[]; }
+const params = new URLSearchParams(location.search);
+const epId = params.get("episode") ?? "v2_001";
+const ep = XEPISODES[epId];
 
 // --- Scene ------------------------------------------------------------------
 const glCanvas = document.createElement("canvas");
@@ -45,70 +48,63 @@ scene.add(key);
 scene.add(new THREE.DirectionalLight(0xffffff, 0.3));
 
 const desk = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshStandardMaterial({ color: TABLE, roughness: 0.9 }));
-desk.position.z = -0.004; desk.receiveShadow = true; // clearly below the board (board bottom at z=0)
+desk.position.z = -0.004; desk.receiveShadow = true;
 scene.add(desk);
 
 const robot = new Xarm5Robot();
+robot.toolYawTarget = -Math.PI / 2; // J5 locks the grip plane; wrist cam follows
 scene.add(robot.root);
 
-// --- Board (data pose) ------------------------------------------------------
-scene.add(buildBoard());
+const tableZ = ep.board ? BOARD_TOP : 0;
+if (ep.board) {
+  const bg = buildBoard();
+  if (ep.boardOffset) {
+    bg.position.set(ep.boardOffset.x, ep.boardOffset.y, 0);
+    bg.rotation.z = (ep.boardOffset.yaw * Math.PI) / 180;
+  }
+  scene.add(bg);
+}
 
-// --- Cameras ----------------------------------------------------------------
-// Overhead pose from PnP fit to the real base image (tools/pnp-overhead.mjs).
-const overhead = new THREE.PerspectiveCamera(44, HALF / IMG_H, 0.01, 50);
+// --- Cameras (per-episode calibration) --------------------------------------
+const overhead = new THREE.PerspectiveCamera(ep.overhead.fov, HALF / IMG_H, 0.01, 50);
 overhead.up.set(0, 0, 1);
-overhead.position.set(0.4667, 0.4617, 0.9797);
-overhead.lookAt(0.4226, 0.0223, 0.2235);
+overhead.position.set(...ep.overhead.pos);
+overhead.lookAt(ep.overhead.target[0], ep.overhead.target[1], ep.overhead.target[2]);
 
-// Wrist camera — RIGIDLY ATTACHED to the wrist (endEffector frame). Since J5
-// locks the tool yaw, the endEffector orientation is constant in world, so the
-// camera holds a fixed orientation and only translates with the arm — exactly
-// like the real wrist cam. Mount pose is tunable (to be PnP-calibrated later).
-// Grip plane azimuth (world). The jaws (and the wrist camera mounted on them)
-// rotate with this. The jaw plane is symmetric, so -90deg keeps the same grip
-// plane as +90deg but flips the mounted camera 180deg into the correct view.
-robot.toolYawTarget = -Math.PI / 2;
-const wrist = new THREE.PerspectiveCamera(58, HALF / H, 0.005, 6);
+// Wrist camera rigidly attached to the wrist; tilt from calibration.
+const wrist = new THREE.PerspectiveCamera(58, HALF / IMG_H, 0.005, 6);
 robot.endEffector.add(wrist);
-wrist.position.set(0, -0.075, -0.055); // local: beside + above the gripper
-wrist.rotation.set(Math.PI - (2 * Math.PI) / 180, 0, 0); // wrist tilt = 2deg (calibrated)
+wrist.position.set(0, -0.075, -0.055);
+wrist.rotation.set(Math.PI - (ep.wristTilt * Math.PI) / 180, 0, 0);
 
-// --- Episode setup ----------------------------------------------------------
-const params = new URLSearchParams(location.search);
-const epId = params.get("episode") ?? "v2_001";
-
+// --- Episode data -----------------------------------------------------------
 let frames: Frame[] = [];
 let task = "";
 let solvedAngles: number[][] = [];
 let grip: number[] = [];
-let queen: THREE.Group | null = null;
-let fromSq: [number, number] = [4, 6];
-let toSq: [number, number] = [7, 0];
+let piece: THREE.Group | null = null;
 let attachFrame = -1, detachFrame = -1;
-
 const _t = new THREE.Vector3();
 
 async function load(): Promise<void> {
-  const meta = await (await fetch(`/rollouts/${epId}/episode.json`)).json();
-  task = meta.task;
+  task = (await (await fetch(`/rollouts/${epId}/episode.json`)).json()).task;
   const text = await (await fetch(`/rollouts/${epId}/frames.jsonl`)).text();
   frames = text.trim().split("\n").map((l) => JSON.parse(l));
 
-  // parse from/to from "... from e7 to h1"
-  const m = task.match(/from ([a-h][1-8]) to ([a-h][1-8])/);
-  if (m) { fromSq = parseSquare(m[1]); toSq = parseSquare(m[2]); }
+  // Place the task piece: at the move start-square, or the pickup world point.
+  piece = createPiece(ep.piece, ep.color);
+  piece.rotation.x = Math.PI / 2; // stand up in Z-up frame
+  if (ep.from) {
+    const [f, r] = parseSquare(ep.from);
+    const c = squareCenter(f, r);
+    piece.position.set(c.x, c.y, tableZ);
+  } else if (ep.atMM) {
+    piece.position.set(ep.atMM[0] / 1000, ep.atMM[1] / 1000, tableZ);
+  }
+  scene.add(piece);
 
-  // queen at from-square
-  queen = createPiece("queen", "white");
-  queen.rotation.x = Math.PI / 2; // stand up in Z-up frame
-  const fc = squareCenter(fromSq[0], fromSq[1]);
-  queen.position.set(fc.x, fc.y, BOARD_TOP);
-  scene.add(queen);
-
-  // The recorded state stream is ~14fps with ~1/3 exact-duplicate frames (state
-  // logged slower than the camera). Dedupe to distinct keyframes, solve IK once
-  // per keyframe, then RESAMPLE by interpolating at a smooth output framerate.
+  // Dedupe the ~14fps state stream (~1/3 duplicates) to distinct keyframes,
+  // solve IK once each, then resample with interpolation for smooth output.
   const keys: { t: number; state: number[]; angles: number[] }[] = [];
   let maxErr = 0, sumErr = 0, nKey = 0;
   for (let i = 0; i < frames.length; i++) {
@@ -125,7 +121,24 @@ async function load(): Promise<void> {
     maxErr = Math.max(maxErr, e); sumErr += e; nKey++;
   }
 
-  // Resample to OUTPUT_FPS with linear interpolation between keyframes.
+  // Detect grasp (and, for moves, release) from the keyframe gripper stream.
+  let tAttach = -1, tDetach = -1;
+  const g = keys.map((k) => k.state[4]);
+  if (ep.to) {
+    const ai = g.findIndex((v) => v < 0.5);
+    if (ai >= 0) {
+      tAttach = keys[ai].t;
+      const di = g.findIndex((v, idx) => idx > ai + 1 && v > 0.5);
+      if (di >= 0) tDetach = keys[di].t;
+    }
+  } else if (ep.atMM) {
+    const gmin = Math.min(...g), gmax = Math.max(...g);
+    const closeT = gmin + 0.45 * (gmax - gmin);
+    const ai = keys.findIndex((k) =>
+      k.state[4] < closeT && Math.hypot(k.state[0] - ep.atMM![0], k.state[1] - ep.atMM![1]) < 80);
+    if (ai >= 0) tAttach = keys[ai].t;
+  }
+
   const duration = frames[frames.length - 1].t;
   const nOut = Math.round(duration * OUTPUT_FPS) + 1;
   const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
@@ -138,8 +151,8 @@ async function load(): Promise<void> {
     solvedAngles.push(a.angles.map((v, c) => lerp(v, b.angles[c], u)));
     grip.push(lerp(a.state[4], b.state[4], u));
   }
-  attachFrame = grip.findIndex((g) => g < 0.5);
-  detachFrame = grip.findIndex((g, i) => i > attachFrame + 2 && g > 0.5);
+  attachFrame = tAttach >= 0 ? Math.round(tAttach * OUTPUT_FPS) : -1;
+  detachFrame = tDetach >= 0 ? Math.round(tDetach * OUTPUT_FPS) : -1;
 
   (window as unknown as Record<string, unknown>).REPLAY = {
     totalFrames: solvedAngles.length,
@@ -152,23 +165,22 @@ async function load(): Promise<void> {
 
 let applied = 0; // 0=none, 1=attached, 2=detached
 function applyGripState(i: number): void {
-  if (!queen) return;
+  if (!piece) return;
   if (applied < 1 && attachFrame >= 0 && i >= attachFrame) {
-    robot.gripper.attach(queen); // preserve world transform
+    robot.gripper.attach(piece); // preserve world transform
     applied = 1;
   }
-  if (applied < 2 && detachFrame >= 0 && i >= detachFrame) {
-    const tc = squareCenter(toSq[0], toSq[1]);
-    scene.attach(queen);
-    queen.position.set(tc.x, tc.y, BOARD_TOP);
-    queen.rotation.set(Math.PI / 2, 0, 0);
+  if (applied < 2 && detachFrame >= 0 && ep.to && i >= detachFrame) {
+    const [f, r] = parseSquare(ep.to);
+    const c = squareCenter(f, r);
+    scene.attach(piece);
+    piece.position.set(c.x, c.y, tableZ);
+    piece.rotation.set(Math.PI / 2, 0, 0);
     applied = 2;
   }
 }
 
 function renderComposite(): void {
-  // Two 320x240 views sit BELOW the caption band. WebGL viewport origin is
-  // bottom-left, so the images occupy y=0..IMG_H and the caption is the top CAP.
   renderer.setScissorTest(true);
   overhead.aspect = HALF / IMG_H; overhead.updateProjectionMatrix();
   renderer.setViewport(0, 0, HALF, IMG_H); renderer.setScissor(0, 0, HALF, IMG_H);
@@ -179,8 +191,6 @@ function renderComposite(): void {
   renderer.setScissorTest(false);
 
   ctx.clearRect(0, 0, W, H);
-  // The GL render occupies the bottom IMG_H rows (WebGL origin is bottom-left);
-  // copy that strip (source y = CAP) down below the caption band.
   ctx.drawImage(glCanvas, 0, CAP, W, IMG_H, 0, CAP, W, IMG_H);
   ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(HALF - 1, CAP, 2, IMG_H);
   ctx.fillStyle = "rgba(0,0,0,0.62)"; ctx.fillRect(0, 0, W, CAP);
