@@ -37,6 +37,10 @@
     <div id="panel">
       <h1>Overhead + wrist calibration</h1>
       <div class="row">
+        <label>Wrist preview</label>
+        <canvas id="wcam" width="320" height="240" style="width: 100%; border: 1px solid #333; border-radius: 6px; display: block;"></canvas>
+      </div>
+      <div class="row">
         <label>Reference overlay</label>
         <button id="refToggle">Show reference</button>
         <input id="refOpacity" type="range" min="0" max="100" value="50" />

@@ -25,7 +25,7 @@ const CFG: Record<string, EpCfg> = {
   all_045: { board: true, piece: "queen", color: "white", from: "d1" },
 };
 
-const CW = 640, CH = 480, PIP = 200;
+const CW = 640, CH = 480;
 const params = new URLSearchParams(location.search);
 const epId = params.get("episode") ?? "all_045";
 const cfg = CFG[epId];
@@ -45,7 +45,19 @@ const key = new THREE.DirectionalLight(0xffffff, 0.9);
 key.position.set(0.4, -0.3, 1.6);
 scene.add(key);
 scene.add(new THREE.DirectionalLight(0xffffff, 0.3));
-const desk = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshStandardMaterial({ color: TABLE, roughness: 0.9 }));
+// Floor with a grid texture (10cm cells) so orientation is easy to read.
+const gc = document.createElement("canvas");
+gc.width = gc.height = 128;
+const gg = gc.getContext("2d")!;
+gg.fillStyle = "#cdb488";
+gg.fillRect(0, 0, 128, 128);
+gg.strokeStyle = "rgba(70,50,25,0.45)";
+gg.lineWidth = 4;
+gg.strokeRect(0, 0, 128, 128);
+const gridTex = new THREE.CanvasTexture(gc);
+gridTex.wrapS = gridTex.wrapT = THREE.RepeatWrapping;
+gridTex.repeat.set(40, 40); // 4m plane / 0.1m cells
+const desk = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshStandardMaterial({ map: gridTex, roughness: 0.9 }));
 desk.position.z = -0.004;
 scene.add(desk);
 
@@ -67,6 +79,11 @@ const controls = new OrbitControls(overhead, canvas);
 controls.enableDamping = true;
 controls.target.set(0.4226, 0.0223, 0.2235);
 
+// Wrist preview in its own canvas/renderer (so it doesn't occlude the overhead).
+const wcanvas = document.getElementById("wcam") as HTMLCanvasElement;
+const wren = new THREE.WebGLRenderer({ canvas: wcanvas, antialias: true });
+wren.setPixelRatio(1);
+wren.setSize(320, 240, false);
 const wrist = new THREE.PerspectiveCamera(58, 320 / 240, 0.005, 6);
 robot.endEffector.add(wrist);
 wrist.position.set(0, -0.075, -0.055);
@@ -158,17 +175,9 @@ function updateReadout(): void {
 
 function tick(): void {
   controls.update();
-  renderer.setScissorTest(false);
   overhead.aspect = CW / CH; overhead.updateProjectionMatrix();
-  renderer.setViewport(0, 0, CW, CH);
   renderer.render(scene, overhead);
-  const ph = Math.round((PIP * 240) / 320);
-  wrist.aspect = 320 / 240; wrist.updateProjectionMatrix();
-  renderer.setScissorTest(true);
-  renderer.setViewport(CW - PIP - 6, 6, PIP, ph);
-  renderer.setScissor(CW - PIP - 6, 6, PIP, ph);
-  renderer.render(scene, wrist);
-  renderer.setScissorTest(false);
+  wren.render(scene, wrist); // separate canvas, no overlap
   updateReadout();
   requestAnimationFrame(tick);
 }
