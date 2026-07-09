@@ -91,18 +91,6 @@ async function load(): Promise<void> {
   const text = await (await fetch(`/rollouts/${epId}/frames.jsonl`)).text();
   frames = text.trim().split("\n").map((l) => JSON.parse(l));
 
-  // Place the task piece: at the move start-square, or the pickup world point.
-  piece = createPiece(ep.piece, ep.color);
-  piece.rotation.x = Math.PI / 2; // stand up in Z-up frame
-  if (ep.from) {
-    const [f, r] = parseSquare(ep.from);
-    const c = squareCenter(f, r);
-    piece.position.set(c.x, c.y, tableZ);
-  } else if (ep.atMM) {
-    piece.position.set(ep.atMM[0] / 1000, ep.atMM[1] / 1000, tableZ);
-  }
-  scene.add(piece);
-
   // Dedupe the ~14fps state stream (~1/3 duplicates) to distinct keyframes,
   // solve IK once each, then resample with interpolation for smooth output.
   const keys: { t: number; state: number[]; angles: number[] }[] = [];
@@ -121,35 +109,36 @@ async function load(): Promise<void> {
     maxErr = Math.max(maxErr, e); sumErr += e; nKey++;
   }
 
-  // Detect grasp (and, for moves, release) from the keyframe gripper stream,
-  // adaptively (some episodes only open to ~0.5). Attach at the closing frame
-  // NEAREST the piece = the real grasp moment.
-  let tAttach = -1, tDetach = -1;
+  // Grasp/release detection, adaptive to each episode's gripper range.
   const g = keys.map((k) => k.state[4]);
   const gmin = Math.min(...g), gmax = Math.max(...g), range = Math.max(1e-6, gmax - gmin);
   const closeT = gmin + 0.4 * range, openT = gmin + 0.5 * range;
-  let px = 0, py = 0;
-  if (ep.from) { const [f, r] = parseSquare(ep.from); const c = squareCenter(f, r); px = c.x * 1000; py = c.y * 1000; }
-  else if (ep.atMM) { px = ep.atMM[0]; py = ep.atMM[1]; }
-  // Grasp = the LOWEST-Z closing frame near the piece (the arm lifts straight up
-  // afterward, so many frames are horizontally over the square — take the lowest).
-  let bestAi = -1, bestZ = Infinity;
+  // A rough estimate only disambiguates the grasp from the release on moves.
+  let estX = 0, estY = 0, hasEst = false;
+  if (ep.from) { const [f, r] = parseSquare(ep.from); const c = squareCenter(f, r); estX = c.x * 1000; estY = c.y * 1000; hasEst = true; }
+  else if (ep.atMM) { estX = ep.atMM[0]; estY = ep.atMM[1]; hasEst = true; }
+  // Grasp = the LOWEST-Z closing frame (nearest the estimate, if any).
+  let gi = -1, gz = Infinity;
   for (let i = 0; i < keys.length; i++) {
-    if (g[i] < closeT && Math.hypot(keys[i].state[0] - px, keys[i].state[1] - py) < 70 && keys[i].state[2] < bestZ) {
-      bestZ = keys[i].state[2];
-      bestAi = i;
+    const near = !hasEst || Math.hypot(keys[i].state[0] - estX, keys[i].state[1] - estY) < 130;
+    if (g[i] < closeT && near && keys[i].state[2] < gz) { gz = keys[i].state[2]; gi = i; }
+  }
+  // Release (moves) = first reopen after the grasp near the placement height.
+  let ri = -1;
+  if (ep.to && gi >= 0) {
+    for (let i = gi + 1; i < keys.length; i++) {
+      if (g[i] > openT && keys[i].state[2] < gz + 80) { ri = i; break; }
     }
   }
-  if (bestAi >= 0) tAttach = keys[bestAi].t;
-  if (ep.to && bestAi >= 0) {
-    // Release = the LOWEST-Z frame after the grasp where the gripper reopens
-    // (the placement contact), so the piece is set down, not dropped mid-air.
-    let di = -1, dz = Infinity;
-    for (let i = bestAi + 1; i < keys.length; i++) {
-      if (g[i] > openT && keys[i].state[2] < dz) { dz = keys[i].state[2]; di = i; }
-    }
-    if (di >= 0) tDetach = keys[di].t;
-  }
+  const tAttach = gi >= 0 ? keys[gi].t : -1;
+  const tDetach = ri >= 0 ? keys[ri].t : -1;
+
+  // Place the piece at the ACTUAL recorded grasp point (where the arm grabs it),
+  // NOT an estimate — so the gripper closes around it with no snap/glitch.
+  piece = createPiece(ep.piece, ep.color);
+  piece.rotation.x = Math.PI / 2; // stand up in Z-up frame
+  piece.position.set((gi >= 0 ? keys[gi].state[0] : estX) / 1000, (gi >= 0 ? keys[gi].state[1] : estY) / 1000, tableZ);
+  scene.add(piece);
 
   const duration = frames[frames.length - 1].t;
   const nOut = Math.round(duration * OUTPUT_FPS) + 1;
@@ -191,9 +180,8 @@ function updatePiece(f: number): void {
     applied = 1;
   }
   if (applied < 2 && detachFrame >= 0 && ep.to && f >= detachFrame) {
-    const [ff, rr] = parseSquare(ep.to);
-    const c = squareCenter(ff, rr);
-    piece.position.set(c.x, c.y, tableZ);
+    // Leave the piece exactly where the gripper released it; settle to surface.
+    piece.position.z = tableZ;
     piece.rotation.set(Math.PI / 2, 0, 0);
     applied = 2;
   }
