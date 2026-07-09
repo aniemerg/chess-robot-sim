@@ -90,6 +90,16 @@ export class Xarm5Robot {
     parent.add(tool);
     this.addMesh(tool, "/assets/end_tool/visual/end_tool_1300.stl", "dark", opts.onMeshLoad);
 
+    // Adapter that visually connects the flange to the gripper (no floating gap).
+    const adapter = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.024, 0.024, 0.05, 24),
+      new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.45, metalness: 0.6 })
+    );
+    adapter.rotation.x = Math.PI / 2; // along +Z (the approach axis)
+    adapter.position.set(0, 0, 0.02);
+    adapter.castShadow = true;
+    tool.add(adapter);
+
     this.endEffector = new THREE.Object3D();
     this.endEffector.position.set(0, 0, 0.035); // along +Z, the approach axis
     tool.add(this.endEffector);

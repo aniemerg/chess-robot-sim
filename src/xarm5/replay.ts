@@ -121,22 +121,27 @@ async function load(): Promise<void> {
     maxErr = Math.max(maxErr, e); sumErr += e; nKey++;
   }
 
-  // Detect grasp (and, for moves, release) from the keyframe gripper stream.
+  // Detect grasp (and, for moves, release) from the keyframe gripper stream,
+  // adaptively (some episodes only open to ~0.5). Attach at the closing frame
+  // NEAREST the piece = the real grasp moment.
   let tAttach = -1, tDetach = -1;
   const g = keys.map((k) => k.state[4]);
-  if (ep.to) {
-    const ai = g.findIndex((v) => v < 0.5);
-    if (ai >= 0) {
-      tAttach = keys[ai].t;
-      const di = g.findIndex((v, idx) => idx > ai + 1 && v > 0.5);
-      if (di >= 0) tDetach = keys[di].t;
+  const gmin = Math.min(...g), gmax = Math.max(...g), range = Math.max(1e-6, gmax - gmin);
+  const closeT = gmin + 0.4 * range, openT = gmin + 0.5 * range;
+  let px = 0, py = 0;
+  if (ep.from) { const [f, r] = parseSquare(ep.from); const c = squareCenter(f, r); px = c.x * 1000; py = c.y * 1000; }
+  else if (ep.atMM) { px = ep.atMM[0]; py = ep.atMM[1]; }
+  let bestAi = -1, bestD = Infinity;
+  for (let i = 0; i < keys.length; i++) {
+    if (g[i] < closeT) {
+      const d = Math.hypot(keys[i].state[0] - px, keys[i].state[1] - py);
+      if (d < bestD) { bestD = d; bestAi = i; }
     }
-  } else if (ep.atMM) {
-    const gmin = Math.min(...g), gmax = Math.max(...g);
-    const closeT = gmin + 0.45 * (gmax - gmin);
-    const ai = keys.findIndex((k) =>
-      k.state[4] < closeT && Math.hypot(k.state[0] - ep.atMM![0], k.state[1] - ep.atMM![1]) < 80);
-    if (ai >= 0) tAttach = keys[ai].t;
+  }
+  if (bestAi >= 0 && bestD < 120) tAttach = keys[bestAi].t; // grasped within 12cm of the piece
+  if (ep.to && bestAi >= 0) {
+    const di = g.findIndex((v, idx) => idx > bestAi + 1 && v > openT);
+    if (di >= 0) tDetach = keys[di].t;
   }
 
   const duration = frames[frames.length - 1].t;
@@ -163,11 +168,18 @@ async function load(): Promise<void> {
   renderFrame(0);
 }
 
+const _tcp = new THREE.Vector3();
 let applied = 0; // 0=none, 1=attached, 2=detached
 function applyGripState(i: number): void {
   if (!piece) return;
   if (applied < 1 && attachFrame >= 0 && i >= attachFrame) {
-    robot.gripper.attach(piece); // preserve world transform
+    // Center the piece between the fingertips (upright, base on the surface),
+    // then attach — so it's held correctly (no float/offset/clipping).
+    robot.getTCP(_tcp);
+    piece.position.set(_tcp.x, _tcp.y, tableZ);
+    piece.rotation.set(Math.PI / 2, 0, 0);
+    piece.updateMatrixWorld(true);
+    robot.gripper.attach(piece); // preserves the (now correct) world transform
     applied = 1;
   }
   if (applied < 2 && detachFrame >= 0 && ep.to && i >= detachFrame) {
