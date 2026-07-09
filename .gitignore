@@ -9,5 +9,5 @@ public/ref_*.png
 rollouts/
 public/rollouts/
 
-# synthetic dataset output
-synth/
+# synthetic dataset output (anchored to repo root; NOT src/synth/)
+/synth/
