@@ -1,6 +1,6 @@
 # Magnus Rollout Data — Analysis & Incorporation Plan
 
-Analysis of `rollouts/magnus_rollout_samples/` with an eye toward
+Analysis of the 8-episode sample bundle (`rollouts/samples/`) with an eye toward
 **exceptionally close replication** of the real episodes in our simulator.
 
 > **Headline:** Yes — the bundle contains the full **path taken by the robot**
@@ -14,7 +14,7 @@ Analysis of `rollouts/magnus_rollout_samples/` with an eye toward
 ## 1. What the bundle contains
 
 ```
-magnus_rollout_samples/
+rollouts/samples/
   README.md
   <dataset>/                       # chess_moves_v2  and  chess_all
     meta.json                      # fps, camera names, state/action schema

@@ -1,10 +1,10 @@
 # Full Rollout Dataset — Analysis (for synthetic data generation)
 
 Analysis of the **complete** Magnus rollout datasets (reassembled from the
-`.tar.gz.part*` files under `rollouts/`, metadata extracted to
-`rollouts/full/`). This is the reference for building a synthetic-trajectory
-generator whose output is as close **in-distribution** as possible to this real
-data.
+`.tar.gz.part*` files in `rollouts/archives/`, extracted to `rollouts/full/`;
+see `rollouts/README.md`). This is the reference for building a
+synthetic-trajectory generator whose output is as close **in-distribution** as
+possible to this real data.
 
 ## 1. Inventory
 

@@ -1,4 +1,9 @@
-# xArm 5 Chessboard Simulator Plan
+# xArm 5 Chessboard Simulator Plan (historical)
+
+> **Historical.** This is the *original* build plan for the crude interactive
+> simulator (the legacy `src/*.ts`). It predates the shift to the official
+> xArm 5 model, real-episode replication, and synthetic data generation. Kept
+> for provenance; see the top-level `README.md` for where the project is now.
 
 ## Goal
 

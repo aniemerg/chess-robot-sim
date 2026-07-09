@@ -23,10 +23,10 @@ differently.
 | **TOTAL** | **793** | **142,473** | **~284,946** | **~171 min (2.85 h)** | **~6 GB** |
 
 - **All 793 episodes are marked `success: true`** (no failures in the set).
-- Located under `rollouts/` as `chess_moves_v2.tar.gz.part00..05` and
-  `chess_all.tar.gz.part00..06`. Metadata (trajectories, no images) is extracted
-  to `rollouts/full/`. A curated 8-episode sample with images lives in
-  `rollouts/magnus_rollout_samples/`.
+- Source archives in `rollouts/archives/` (`chess_moves_v2.tar.gz.part00..05`,
+  `chess_all.tar.gz.part00..06`); extracted full dataset (trajectories **and**
+  images) in `rollouts/full/`. A curated 8-episode sample lives in
+  `rollouts/samples/`. See `rollouts/README.md` for the layout.
 
 ## The tasks — full breakdown
 

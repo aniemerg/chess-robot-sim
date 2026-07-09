@@ -1,159 +1,107 @@
-# xArm 5 Chessboard Simulator
+# xArm5 Chess — simulator & synthetic training data
 
-A standalone browser-based 3D simulator for a simplified UFACTORY xArm 5 robot
-arm operating over a chessboard. Built with Vite + TypeScript + Three.js.
+This project builds toward one goal: **generate large amounts of synthetic
+training data** for a robot policy that drives a UFACTORY **xArm 5** arm to move
+chess pieces — data that is as **in-distribution** as possible with a set of real
+teleoperated episodes we were given (the "Magnus rollouts").
 
-The visual model is deliberately crude (primitive cylinders/boxes), but the
-joint hierarchy, degrees of motion, target reaching, and animation behavior are
-faithful enough to reason about how the arm moves through space.
+The synthetic data is meant as **mid-train augmentation**: broaden the pieces,
+squares, tasks, scenes, lighting, and camera variety far beyond what the ~793
+real episodes cover, while keeping the exact recorded motion style — then
+fine-tune on the real episodes.
+
+To get there we built a Three.js **kinematic simulator** of the arm and board,
+proved it can **replicate** real episodes frame-for-frame (calibrated cameras +
+recorded trajectories), and analyzed the real dataset in depth. The synthetic
+generator is the next step.
+
+## The story, in four workstreams
+
+1. **Understand the real data.** ~793 real teleoperated episodes across two
+   datasets, each = a natural-language task + per-frame TCP pose/gripper + base
+   (overhead) and wrist camera JPGs. Cataloged and analyzed in `docs/`.
+   → `docs/existing_dataset_catalog.md`, `docs/full_dataset_analysis.md`
+2. **Simulate the arm.** A Three.js xArm 5 using the **official** UFACTORY
+   kinematics + meshes, in the ROS arm-base frame, with a CCD IK solver that
+   keeps the tool vertical and locks grip-plane yaw.
+   → `src/xarm5/`
+3. **Replicate real episodes.** Calibrate the overhead + wrist cameras to the
+   real views, drive the arm along a recorded trajectory, and render a
+   side-by-side comparison. This is how we validated the sim against reality.
+   → `src/xarm5/replay.ts`, `src/xarm5/calibrate.ts`, `replicas/`
+4. **Generate synthetic data (next).** A pipeline that plans in-distribution
+   trajectories, renders per-frame base+wrist JPGs with domain randomization,
+   and logs a per-episode manifest of every randomized variable for ablations.
+   → `docs/synthetic_data_plan.md`, planned under `src/synth/`
+
+## Repository map
+
+```
+README.md                This file — the project narrative.
+docs/                    Analysis + plans (start at docs/README.md).
+  existing_dataset_catalog.md   What tasks/how much data is in the real set.
+  full_dataset_analysis.md      The real motion profile (heights, speed, yaw…).
+  rollout_data_analysis.md      Deep-dive on the 8-episode sample bundle.
+  synthetic_data_plan.md        Plan for the synthetic generator.
+  original-simulator-plan.md    Historical: the original crude-sim build plan.
+  xarm_ros_official/            Official xArm5 URDF/kinematics reference files.
+rollouts/                The real robot data (gitignored; see rollouts/README.md).
+src/xarm5/               CURRENT pipeline: official arm model, IK, replay, calibrate.
+src/                     LEGACY interactive simulator (crude primitives) + its tools.
+public/                  Static assets served to the browser (meshes, sample episodes).
+tools/                   Headless (Playwright/ffmpeg) render + probe drivers.
+replicas/                Rendered sim replicas of real episodes (gitignored outputs).
+```
+
+Two generations of the simulator live side by side. `src/xarm5/*` is the current
+one (official model, ROS frame, real-data replication). The top-level `src/*.ts`
+(`main.ts`, `robot.ts`, `chessboard.ts`, `pieces.ts`, `ik.ts`, plus
+`export.ts` / `calibrate.ts` and `src/replication/`) is the **earlier** crude
+simulator — a hand-built primitive arm with analytical vertical-tool IK and an
+interactive board editor. It's kept for reference; new work is in `src/xarm5/`.
 
 ## Quick start
 
 ```bash
 npm install
-npm run dev        # start the dev server (prints a localhost URL)
-```
-
-Other commands:
-
-```bash
-npm run build      # type-check and produce a production build in dist/
-npm run preview    # serve the production build
+npm run dev        # start the Vite dev server (prints a localhost URL)
+npm run build      # type-check + production build into dist/
 npm run typecheck  # type-check only
-npm run test:ik    # headless FK/IK sanity check (solves every board square)
+npm run test:ik    # headless FK/IK sanity check (legacy sim; solves every square)
 ```
 
-`npm run test:ik` runs a Node harness (`test-ik.mts`) with no browser: it builds
-the arm, solves every chessboard square, verifies the gripper stays vertical
-(0° tilt) at each one, confirms a far target is flagged unreachable, and checks
-that solving does not disturb the current pose.
+Entry points (Vite multi-page; open each at the dev URL):
 
-## Using the simulator
+| Page | Loads | What it is |
+| --- | --- | --- |
+| `xarm5.html` | `src/xarm5/verify.ts` | **Current** arm model viewer / FK-IK verification. |
+| `replay.html` | `src/xarm5/replay.ts` | **Current** replay: drive the arm along a real recorded trajectory, render base+wrist. |
+| `xarm5-calibrate.html` | `src/xarm5/calibrate.ts` | **Current** interactive camera calibration against a real base image. |
+| `index.html` | `src/main.ts` | Legacy interactive simulator (board editor, manual IK, wrist cam). |
+| `calibrate.html` / `export.html` | `src/calibrate.ts` / `src/export.ts` | Legacy replication/calibration tools. |
 
-- **Orbit camera** — drag to rotate, scroll / pinch to zoom.
-- **Pick and place** — click a chess piece to pick it up, then click a square to
-  put it down. The arm approaches from above, lowers, grips, lifts, and places —
-  with the parallel-jaw gripper held **vertical** the whole time.
-- **Click an empty square** — sends the gripper just above that square (vertical).
-- **Joint sliders** — five revolute joints (J1–J5); moving a slider immediately
-  updates the arm and the end-effector readout (and takes over from any motion).
-- **Target X/Y/Z** — type a coordinate (meters) and press **Move to target** to
-  send the gripper there, kept vertical.
-- **Reset pose** — opens the gripper and animates back to the home pose.
-- **Home (board view)** — raises the arm over the near edge with the gripper
-  vertical and widens the wrist-cam focal length, so the wrist camera frames the
-  entire board (a good vantage before recording).
-- **Wrist camera** — the inset viewport (lower-right) is a camera mounted just
-  below joint 4, looking along the remaining arm toward the gripper. It rides
-  the wrist, so it shows a gripper's-eye view of the target during pick-and-place.
-  The image is rolled 180° for an egocentric orientation — the gripper sits at
-  the bottom of the frame with the board ahead, like looking down at your hand.
-  The **Focal** slider (under *Wrist camera*) varies the lens focal length in
-  millimeters — drag toward 85 mm to zoom in, toward 12 mm for a wide view.
-- **Angle** (under *Wrist camera*) — a calibration control (not a robot joint)
-  for the camera's mounting tilt relative to the arm axis: 0° looks straight
-  along the remaining arm, larger values tilt toward the gripper. Use it to
-  match the simulated view to a real wrist-mounted camera.
-- **Record / Snapshot** — under *Wrist camera*, **Record** captures the wrist
-  view to a video file (a red ●REC badge with an elapsed timer shows on the
-  inset); pressing **Stop** downloads it. **Snapshot** saves a single still.
-  Pick the **Resolution** (480p / 720p / 1080p) before recording. Recording and
-  stills are rendered on a dedicated offscreen canvas, so the saved frame is the
-  clean wrist view at full resolution — not a crop of the on-screen inset. Files
-  download as `wristcam-<timestamp>.webm` / `.png` (WebM via `MediaRecorder`;
-  the exact codec is whatever the browser supports — Chrome/Firefox use VP9/VP8).
-- **Board editor** — toggle **Edit board** to rearrange the position by hand
-  (the robot parks itself out of the way). Tools:
-  - **Move** — click a piece to select it, then click a square to move it
-    (capturing any occupant). The selected piece is highlighted with a ring.
-  - **Erase** — click a piece to remove it (or use **Remove selected**).
-  - **Pawn / Knight / Bishop / Rook / Queen / King** — click a square to add (or
-    replace) that piece in the current brush color.
-  - **Color** — toggles the brush between White/Black; also recolors the
-    selected piece.
-  - **Reset to start** restores the standard opening position; **Clear board**
-    removes every piece.
-- **Status** — live grasp-point position plus the IK result (reached /
-  joint-limited / unreachable, with error).
+## Reference — the current (xarm5) model
 
-## Coordinate system (units: meters)
+- **Frame / units:** ROS arm-base frame — **Z up, +X forward, +Y left**,
+  desk at z≈0, meters internally (real data is in **mm**). Base at the origin.
+- **State / action** (as recorded): `[x, y, z (mm), yaw (deg), gripper (0–1, 1=open)]`;
+  `action[i] ≈ state[i+1]` (the commanded next state).
+- **Robot** (`src/xarm5/robot.ts`): official xArm 5 joint-origin kinematics and
+  STL meshes (from `docs/xarm_ros_official/`), an inline +Z parallel-jaw gripper,
+  and a CCD IK solver with a vertical-tool constraint and J5 yaw-locking (J5
+  counter-rotates J1 so the grip plane + wrist camera hold a fixed orientation).
+- **Board** (`src/xarm5/board.ts`): grid fitted from real grasp/release anchors
+  (a1 ≈ (251, 212) mm, ~56.9 mm squares).
 
-- `X` — board left/right
-- `Y` — height above the table (up)
-- `Z` — board forward/back
-- The robot base sits just behind the board at `(0, 0, -0.12)`.
-- The board lies flat on the `X/Z` plane, centered at `(0, 0, 0.16)`.
+The legacy simulator uses a *different* convention (Y-up, crude primitive links,
+analytical IK) — see `docs/original-simulator-plan.md` and the top-level `src/`
+files. The published xArm 5 joint limits and the ROS URDF are the shared
+reference for both.
 
-## Robot model
+## Known scope
 
-A 5-DOF arm with a parallel-jaw gripper, in a parent-child hierarchy
-(`base → J1 → link → J2 → link → J3 → link → J4 → link → J5 → gripper`).
-Joint limits are the **published UFACTORY xArm 5 ranges**:
-
-| Joint | Motion          | Local axis | Limit          |
-| ----- | --------------- | ---------- | -------------- |
-| J1    | base yaw        | Y          | ±360°          |
-| J2    | shoulder pitch  | X          | −118°…120°     |
-| J3    | elbow pitch     | X          | −225°…11°      |
-| J4    | wrist pitch     | X          | −97°…180°      |
-| J5    | wrist roll      | Y          | ±360°          |
-
-Max joint speed on the real arm is 180°/s. At the model's zero pose the arm
-points straight up; the home pose curls it forward with the gripper hanging
-vertically over the board.
-
-## Inverse kinematics
-
-**Analytical, vertical-tool** IK (`src/ik.ts`). Because pick-and-place over a
-board wants the gripper pointing straight down, the tool is constrained vertical
-for every target. That makes the solve exact and fast:
-
-1. **J1** yaws to aim the arm's plane at the target.
-2. The wrist (J4) must sit directly above the target by the tool length, so a
-   planar two-link solve (**J2, J3**) places it — both elbow configurations are
-   tried and the first that respects all joint limits wins.
-3. **J4** is set so the cumulative pitch points the tool straight down.
-4. **J5** roll does not affect position and is left as-is.
-
-If a target is out of reach or no configuration satisfies the joint limits, the
-arm moves to the closest valid pose and the status panel reports
-*unreachable* or *joint-limited*. The headless test confirms a 0° tilt (perfect
-verticality) across all 64 squares.
-
-## Chess pieces
-
-Classic Staunton-style models (`src/pieces.ts`). The rotationally symmetric
-pieces (pawn, rook, bishop, queen, king) are turned from hand-drawn silhouettes
-with `THREE.LatheGeometry`; the knight uses an extruded horse-head profile on a
-turned base. Recognizable toppers are added separately: rook crenellations,
-bishop mitre ball, queen coronet, king cross. A full standard starting position
-is set up on the board.
-
-## Known approximations
-
-- 5 DOF means the arm solves for position (`x, y, z`) with the tool held
-  vertical — it does not target arbitrary 6-D orientation (expected for xArm 5).
-- Link lengths are rounded proportions (see `src/robot.ts`) chosen so the whole
-  board is reachable with the gripper vertical; they do not match the official
-  URDF exactly. Joint *limit ranges* do match the published xArm 5 values, but
-  the model's zero pose and axis signs are our own convention (we pick signs so
-  natural board reaches land inside the real limits), not the factory home.
-- Arm/gripper geometry is primitive (cylinders/boxes); no official meshes are
-  imported. Reference: the xArm description URDF in the
-  [xArm-Developer/xarm_ros](https://github.com/xArm-Developer/xarm_ros/tree/master/xarm_description/urdf)
-  repository.
-- Pieces are visual/graspable only — there is no chess-rules gameplay.
-
-## Project structure
-
-```
-index.html          markup + control panel + wrist-cam frame
-src/style.css        panel + layout styling
-src/main.ts          wiring: scene, robot, board, raycasting, pick/place, wrist-cam inset
-src/scene.ts         renderer, camera, lights, ground, orbit controls
-src/robot.ts         xArm 5 joint hierarchy + gripper + wrist camera + forward kinematics
-src/ik.ts            analytical vertical-tool inverse kinematics
-src/chessboard.ts    8x8 board + Staunton set + pick/place + editing API
-src/pieces.ts        Staunton-style chess piece geometry
-src/ui.ts            HTML control panel controller
-```
+- 5-DOF: the arm solves for position with the tool held vertical (grip-plane yaw
+  via J5); it does not target arbitrary 6-D orientation (expected for xArm 5).
+- The sim is **kinematic**, not physical (no dynamics/contact) — sufficient for
+  matching the recorded pick-and-place motion and rendering camera views.
+- Pieces are visual/graspable only; there is no chess-rules gameplay.
