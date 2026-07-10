@@ -241,10 +241,12 @@ Deliberately no scale/compute plan yet — that's premature. Sequence:
 
 ## 9. Open decisions to confirm
 
-1. **Piece sources**: RESOLVED — pull CC-licensed sets online. First set wired:
-   `polyhaven_chess_set` (CC0, Poly Haven) via `src/synth/piece_models.ts`, with
-   `procedural_lathe` as the fallback. More sets can drop into
-   `public/assets/pieces/<set>/`. (Add novelty sets next.)
+1. **Piece sources**: RESOLVED — CC-licensed sets pulled online. Wired in
+   `src/synth/piece_models.ts`: `polyhaven_chess_set` (CC0), `poly_jarlan_lowpoly`
+   (CC-BY), plus procedural Staunton + 3 proportion variants — 6 sets total.
+   NOTE: cleanly *separable* CC chess sets are scarce (most online sets are a
+   single merged mesh); more sourced sets need manual download (e.g. Sketchfab
+   CC-BY) or per-piece assembly. Drop new sets into `public/assets/pieces/<set>/`.
 2. **Wide-augmentation tier**: keep a two-tier (near-real jitter vs wide swings)
    scheme; what rough fraction goes "wide" (can defer until we see a few).
 3. **Board realism**: the real boards are fairly plain — how far to push board

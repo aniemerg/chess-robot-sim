@@ -35,11 +35,21 @@ Scenarios (parametric core, plan §3): `queen_move`, `queen_move_yaw90`,
 `table_pickup`. Open `synth.html?scenario=&seed=` in the dev server to inspect
 one interactively. Append `&set=<id>` (or a 6th CLI arg) to force a piece set.
 
-**Piece models** (`piece_models.ts`): episodes randomly draw a set. Available:
-`procedural_lathe` (in-repo Staunton) and `polyhaven_chess_set` (CC0, Poly Haven,
-per-piece nodes extracted + normalized). glTF/GLB sets drop into
-`public/assets/pieces/<set>/` + an entry in `GLTF_SETS`; each is logged with its
-license in the manifest. The wrist camera is **not** randomized (fixed mount).
+**Piece models** (`piece_models.ts`): episodes randomly draw one of several
+sets (each logged with its license in the manifest). Three set kinds:
+
+| set id | kind | license |
+|---|---|---|
+| `procedural_classic` | procedural | in-repo |
+| `procedural_slim` / `procedural_wide` / `procedural_tall` | procedural (proportion variants) | in-repo |
+| `polyhaven_chess_set` | glTF, per-piece nodes | CC0 (Poly Haven / Riley Queen) |
+| `poly_jarlan_lowpoly` | per-type GLB files | CC-BY (Jarlan Perez / Poly Pizza) |
+
+Sourced sets live under `public/assets/pieces/<set>/` with an `ATTRIBUTION.md`.
+Adding a set = drop files there + one entry in `SETS` (`gltf-nodes` for a single
+glTF with named piece nodes, or `per-type` for one GLB per piece type; low-poly
+GLBs without normals are auto-fixed). The wrist camera is **not** randomized
+(fixed mount).
 
 ## Status & known gaps (first slice)
 

@@ -110,7 +110,9 @@ export async function buildScene(spec: SceneSpec, rng: Rng): Promise<BuiltScene>
   const piece = await makePiece(spec.piece.model, spec.piece.type, spec.piece.color);
   recolorPiece(piece, spec.piece);
   piece.rotation.x = Math.PI / 2; // stand up in Z-up frame
-  piece.scale.setScalar(spec.piece.scale);
+  // Multiply (not overwrite): keep the model's normalization / style scale and
+  // apply the per-episode scale jitter on top.
+  piece.scale.multiplyScalar(spec.piece.scale);
   piece.position.set(spec.pieceStartMM[0] / 1000, spec.pieceStartMM[1] / 1000, tableZ);
   scene.add(piece);
 
