@@ -43,6 +43,7 @@ export interface MotionParams {
   settle: number; // s, low-z settle each end
   fps: number; // nominal camera fps
   dtJitter: number; // fractional per-frame dt jitter
+  pickupTargetDur?: number; // s, target total duration for pickups (real range 13-31s)
 }
 
 export interface PlanResult {
@@ -90,10 +91,44 @@ function buildSegments(p: Primitive, m: MotionParams, rng: Rng): { segs: Segment
   const segs: Segment[] = [];
   const spatial = (from: Pose, to: Pose) => segs.push({ from, to, dur: Math.max(1e-3, dist3(from, to) / m.speed) });
   const hold = (pose: Pose, to: Pose, dur: number) => segs.push({ from: pose, to, dur });
+  // Slow wandering motion around a center for `dur` seconds (the teleoperator
+  // repositioning) — fills long pickup phases WITHOUT freezing the frames.
+  // Returns to `center` so the next phase connects cleanly.
+  const wander = (center: Pose, rXY: number, rZ: number, dur: number): void => {
+    const steps = Math.max(1, Math.round(dur / 1.6));
+    let prev = center;
+    for (let s = 0; s < steps; s++) {
+      const to: Pose = s === steps - 1 ? center : {
+        x: center.x + (rng() - 0.5) * 2 * rXY,
+        y: center.y + (rng() - 0.5) * 2 * rXY,
+        z: center.z + (rng() - 0.5) * 2 * rZ,
+        yaw: center.yaw,
+        grip: center.grip,
+      };
+      hold(prev, to, dur / steps);
+      prev = to;
+    }
+  };
+
+  // Pickup timing: real pickups are long (~13-31s) — the operator hovers low
+  // before grasping, then holds at the top. Size the low-z hover + top-hold to
+  // hit the target duration; the grasp then happens late, as in the real data.
+  let hoverLow = 0, holdHigh = uniform(rng, 0.6, 1.2);
+  if (p.kind === "pickup" && m.pickupTargetDur) {
+    const liftZ = p.pickupLiftZ ?? 364;
+    const highPose: Pose = { x: gx, y: gy, z: liftZ, yaw: Y, grip: C };
+    const tApproach = dist3(home, aboveGrasp(Y, O)) / m.speed + dist3(aboveGrasp(Y, O), atGrasp(Y, O)) / m.speed;
+    const tLift = dist3(atGrasp(Y, C), highPose) / m.speed;
+    const baseHold = 0.8;
+    const extra = Math.max(0, m.pickupTargetDur - (tApproach + m.dwellClose + m.settle + tLift + baseHold));
+    hoverLow = extra * 0.55; // ~half the slack as a low hover before grasp
+    holdHigh = baseHold + extra * 0.45; // the rest as a hold at the top
+  }
 
   // Approach: home -> above grasp (yaw blends 0 -> Y) -> descend to grasp.
   spatial(home, aboveGrasp(Y, O));
   spatial(aboveGrasp(Y, O), atGrasp(Y, O));
+  if (hoverLow > 0) wander(atGrasp(Y, O), 18, 6, hoverLow); // slow low-z hover/reposition before grasp
   // Close on the piece (grip O -> C), then settle. graspT = end of the close ramp.
   hold(atGrasp(Y, O), atGrasp(Y, C), m.dwellClose);
   let acc = segs.reduce((s, g) => s + g.dur, 0);
@@ -119,7 +154,7 @@ function buildSegments(p: Primitive, m: MotionParams, rng: Rng): { segs: Segment
     const liftZ = p.pickupLiftZ ?? 364;
     const high: Pose = { x: gx, y: gy, z: liftZ, yaw: Y, grip: C };
     spatial(atGrasp(Y, C), high);
-    hold(high, high, uniform(rng, 0.6, 1.2)); // brief inspect hold at the top
+    wander(high, 22, 14, holdHigh); // slow inspection movement at the top (not frozen)
   }
   return { segs, graspT, releaseT };
 }

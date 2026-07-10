@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { Xarm5Robot } from "../xarm5/robot";
 import { PieceType, PieceColor } from "../pieces";
-import { buildBoard, BOARD_TOP, makeFloorTexture } from "../xarm5/board";
+import { buildBoard, BOARD_TOP } from "../xarm5/board";
 import { makePiece } from "./piece_models";
-import { Rng, uniform, gauss, pick, chance } from "./rng";
+import { FloorSpec, sampleFloor, makeFloorMaterial } from "./floors";
+import { Rng, uniform, gauss, pick, chance, randInt } from "./rng";
 
 /**
  * Build a randomized synthetic scene (robot + table/board + piece + lights +
@@ -17,11 +18,21 @@ export interface CameraSpec {
   target: [number, number, number];
   fov: number;
 }
+export interface DirLightSpec {
+  azimuthDeg: number; // horizontal direction the light comes from
+  elevationDeg: number; // angle above the table
+  intensity: number;
+  color: number; // color temperature (hex)
+  shadow: boolean;
+  softness: number; // shadow blur radius
+}
 export interface LightingSpec {
-  hemi: number;
-  keyIntensity: number;
-  keyPos: [number, number, number];
-  fillIntensity: number;
+  ambient: number;
+  ambientColor: number;
+  hemi: number; // hemisphere intensity (0 = off)
+  hemiSky: number;
+  hemiGround: number;
+  dir: DirLightSpec[]; // 1-3 sun-like directional sources at varied angles
 }
 export interface PieceSpec {
   type: PieceType;
@@ -31,14 +42,6 @@ export interface PieceSpec {
   roughness: number;
   metalness: number;
   scale: number;
-}
-export interface FloorSpec {
-  family: "wood" | "plain";
-  color: number; // hex tint / solid color
-  roughness: number;
-  repeat: number; // texture tiling (wood)
-  rotationDeg: number; // texture rotation (wood)
-  bgScale: number; // background = floor color * bgScale
 }
 export interface SceneSpec {
   board: boolean;
@@ -79,30 +82,41 @@ function recolorPiece(piece: THREE.Group, spec: PieceSpec): void {
   });
 }
 
-export async function buildScene(spec: SceneSpec, _rng: Rng): Promise<BuiltScene> {
+export async function buildScene(spec: SceneSpec, rng: Rng): Promise<BuiltScene> {
   const scene = new THREE.Scene();
   // Background wall tinted from the floor color so the scene reads coherently.
   scene.background = new THREE.Color(spec.floor.color).multiplyScalar(spec.floor.bgScale);
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xa8a99c, spec.lighting.hemi));
-  const key = new THREE.DirectionalLight(0xffffff, spec.lighting.keyIntensity);
-  key.position.set(...spec.lighting.keyPos);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.near = 0.1;
-  key.shadow.camera.far = 5;
-  key.shadow.radius = 3;
-  scene.add(key);
-  scene.add(new THREE.DirectionalLight(0xffffff, spec.lighting.fillIntensity));
-
-  const deskMat = new THREE.MeshStandardMaterial({ color: spec.floor.color, roughness: spec.floor.roughness });
-  if (spec.floor.family === "wood") {
-    const tex = makeFloorTexture();
-    tex.center.set(0.5, 0.5);
-    tex.rotation = (spec.floor.rotationDeg * Math.PI) / 180;
-    tex.repeat.set(spec.floor.repeat, spec.floor.repeat);
-    deskMat.map = tex; // color multiplies the grain -> varied wood tones
+  const L = spec.lighting;
+  scene.add(new THREE.AmbientLight(L.ambientColor, L.ambient));
+  if (L.hemi > 0) scene.add(new THREE.HemisphereLight(L.hemiSky, L.hemiGround, L.hemi));
+  const workCenter = new THREE.Vector3(0.42, 0, 0.12);
+  for (const d of L.dir) {
+    const light = new THREE.DirectionalLight(d.color, d.intensity);
+    const el = (d.elevationDeg * Math.PI) / 180, az = (d.azimuthDeg * Math.PI) / 180, D = 2.4;
+    light.position.set(
+      workCenter.x + Math.cos(el) * Math.cos(az) * D,
+      workCenter.y + Math.cos(el) * Math.sin(az) * D,
+      workCenter.z + Math.sin(el) * D
+    );
+    const tgt = new THREE.Object3D();
+    tgt.position.copy(workCenter);
+    scene.add(tgt);
+    light.target = tgt;
+    if (d.shadow) {
+      light.castShadow = true;
+      light.shadow.mapSize.set(2048, 2048);
+      light.shadow.camera.near = 0.1;
+      light.shadow.camera.far = 6;
+      const cam = light.shadow.camera as THREE.OrthographicCamera;
+      cam.left = -1.2; cam.right = 1.2; cam.top = 1.2; cam.bottom = -1.2;
+      cam.updateProjectionMatrix();
+      light.shadow.radius = d.softness;
+    }
+    scene.add(light);
   }
+
+  const deskMat = makeFloorMaterial(spec.floor, rng);
   const desk = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), deskMat);
   desk.position.z = -0.004;
   desk.receiveShadow = true;
@@ -142,28 +156,31 @@ export async function buildScene(spec: SceneSpec, _rng: Rng): Promise<BuiltScene
   return { scene, robot, overhead, wrist, piece, tableZ };
 }
 
-const WOOD_COLORS = [0xc8a678, 0xb98a55, 0xd8b98a, 0xa9825a, 0x9c7248, 0xcbb086, 0x8f6b47, 0xdcc39a];
-const PLAIN_COLORS = [0x8a8f96, 0x6f7580, 0xb7b2a6, 0x556b5a, 0x7a6f63, 0x9aa0a6, 0x3f4650, 0xa89c86, 0x4a5a6a];
+// Light color temperatures from warm (tungsten) through neutral to cool (shade/sky).
+const LIGHT_COLORS = [0xffffff, 0xfff1e0, 0xffe6c0, 0xffd9a8, 0xf3f6ff, 0xdfeaff, 0xcfe0ff, 0xfff8ee];
 
-/** Sample a floor/table finish: varied wood tones or a plain solid surface. */
-function sampleFloor(rng: Rng): FloorSpec {
-  if (chance(rng, 0.6)) {
-    return {
-      family: "wood",
-      color: pick(rng, WOOD_COLORS),
-      roughness: uniform(rng, 0.7, 0.92),
-      repeat: uniform(rng, 1.8, 3.6),
-      rotationDeg: uniform(rng, 0, 90),
-      bgScale: uniform(rng, 0.75, 0.95),
-    };
+/** Sample a lighting rig: ambient + optional hemisphere + 1-3 sun-like directionals. */
+function sampleLighting(rng: Rng): LightingSpec {
+  const n = randInt(rng, 1, 3);
+  const dir: DirLightSpec[] = [];
+  for (let i = 0; i < n; i++) {
+    dir.push({
+      azimuthDeg: uniform(rng, 0, 360),
+      elevationDeg: uniform(rng, 22, 82),
+      // one bright key (casts shadow) + dimmer fills from other directions
+      intensity: i === 0 ? uniform(rng, 0.65, 1.15) : uniform(rng, 0.15, 0.5),
+      color: pick(rng, LIGHT_COLORS),
+      shadow: i === 0,
+      softness: uniform(rng, 1, 6),
+    });
   }
   return {
-    family: "plain",
-    color: pick(rng, PLAIN_COLORS),
-    roughness: uniform(rng, 0.5, 0.95),
-    repeat: 1,
-    rotationDeg: 0,
-    bgScale: uniform(rng, 0.7, 0.95),
+    ambient: uniform(rng, 0.06, 0.45),
+    ambientColor: pick(rng, LIGHT_COLORS),
+    hemi: chance(rng, 0.6) ? uniform(rng, 0.2, 0.85) : 0,
+    hemiSky: pick(rng, [0xffffff, 0xdfeaff, 0xfff1e0]),
+    hemiGround: pick(rng, [0xa8a99c, 0x8a8f96, 0x6b5a3a, 0x555a52]),
+    dir,
   };
 }
 
@@ -179,12 +196,7 @@ export function sampleSceneRandomization(
   boardOffset: { x: number; y: number; yaw: number };
 } {
   return {
-    lighting: {
-      hemi: gauss(rng, 1.15, 0.12),
-      keyIntensity: gauss(rng, 0.9, 0.1),
-      keyPos: [gauss(rng, 0.4, 0.15), gauss(rng, -0.3, 0.15), gauss(rng, 1.6, 0.2)],
-      fillIntensity: gauss(rng, 0.3, 0.06),
-    },
+    lighting: sampleLighting(rng),
     floor: sampleFloor(rng),
     // Overhead is an EXTERNAL camera whose pose varies per real setup — jitter it.
     overhead: {

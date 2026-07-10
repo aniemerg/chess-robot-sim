@@ -103,6 +103,9 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
   }
 
   const motion = sampleMotionParams(rng, yawDeg);
+  // Pickups run long in the real data (13.5-31.5s, mean ~22): sample a target in
+  // that range so synthetic pickups match within the real spread.
+  if (primitive.kind === "pickup") motion.pickupTargetDur = Math.max(13.5, Math.min(31.5, gauss(rng, 22, 4.5)));
   const rand = sampleSceneRandomization(rng, { overhead: baseOverhead, wristTilt: 2 });
   const pieceSpec = samplePieceSpec(rng, pieceType, color);
 
@@ -144,6 +147,7 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
       floor: {
         family: rand.floor.family,
         color: `#${rand.floor.color.toString(16).padStart(6, "0")}`,
+        color2: `#${rand.floor.color2.toString(16).padStart(6, "0")}`,
         roughness: +rand.floor.roughness.toFixed(3),
         repeat: +rand.floor.repeat.toFixed(2),
         rotationDeg: +rand.floor.rotationDeg.toFixed(1),

@@ -13,6 +13,7 @@ motion.ts     primitive + params -> TRUE per-frame TCP path (phase machine @ mea
 quantize.ts   true path -> sample-held `state` stream (recorder polling artifact)
 scene.ts        spec -> randomized Three.js scene (reuses xarm5 robot/board)
 piece_models.ts pluggable piece sets: procedural_lathe + sourced glTF/GLB sets
+floors.ts       procedural table finishes (wood/tile/checker/marble/concrete/cloth/grid/plain)
 generate.ts     entry: plan -> per-frame IK -> expose window.SYNTH { renderBase, renderWrist, frames, manifest }
 rng.ts          one seed -> all sampling (fully reproducible from the manifest)
 ```
@@ -58,10 +59,12 @@ Working end-to-end for the three first-milestone scenarios; IK follow error
 validation harness, plan §6):
 - **State duplicate fraction** runs ~0.77–0.83 vs real 0.34–0.68 — the poll rate
   vs camera fps needs calibration in `quantize.ts` / `sampleMotionParams`.
-- **Pickup duration** ~3.4 s is short vs real pickups (8–31 s); add longer
-  inspect holds.
 - Randomization is the near-real ("in_distribution") tier only; the wide-aug
-  tier, background clutter, and sensor noise are not wired yet (plan §5).
-  (Sourced glTF piece sets and floor/table finish variation ARE wired.)
-- Grasp height is piece-dependent (~0.7x piece height) so the fingers close on
-  the piece body; the pickup overhead frames the piece region up close.
+  tier, background clutter, and image sensor noise are not wired yet (plan §5).
+
+Wired: sourced glTF/GLB piece sets; **floor/table texture families** (not just
+color — `floors.ts`); a **varied lighting rig** (ambient + optional hemisphere +
+1–3 sun-like directionals at random azimuth/elevation/temperature, one shadowed);
+piece-dependent grasp height (~0.7x piece height, ~46mm queen); close pickup
+overhead framing; **pickup durations matched to real** (13.5–31.5s) via a slow
+low-z hover + top hold that wanders (frames stay live, no frozen runs).
