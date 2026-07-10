@@ -57,9 +57,10 @@ def run_episode(sim, policy, scenario, seed, max_infer, exec_horizon, record=Fal
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--policy", default="oracle", choices=["oracle", "random", "openpi"])
+    ap.add_argument("--policy", default="oracle", choices=["oracle", "random", "openpi", "lerobot"])
     ap.add_argument("--policy-host", default="localhost")
     ap.add_argument("--policy-port", type=int, default=8000)
+    ap.add_argument("--lerobot-model", default="lerobot/pi05_base", help="LeRobot checkpoint path/id for --policy lerobot")
     ap.add_argument("--sim-host", default="localhost")
     ap.add_argument("--sim-port", type=int, default=8010)
     ap.add_argument("--n", type=int, default=10, help="tasks per scenario")
@@ -73,7 +74,7 @@ def main():
     sim = SimClient(args.sim_host, args.sim_port)
     if not sim.health():
         raise SystemExit(f"sim server not reachable at {args.sim_host}:{args.sim_port} — run `node tools/sim-server.mjs` first")
-    policy = make_policy(args.policy, host=args.policy_host, port=args.policy_port)
+    policy = make_policy(args.policy, host=args.policy_host, port=args.policy_port, model=args.lerobot_model)
 
     tasks = build_tasks(args.scenarios, args.n)
     print(f"policy={args.policy}  tasks={len(tasks)}  ({args.n}/scenario)")

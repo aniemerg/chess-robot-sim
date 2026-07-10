@@ -17,3 +17,9 @@ eval/results.json
 eval/rollouts/
 __pycache__/
 *.pyc
+
+# python venv for LeRobot/pi0.5
+.venv/
+
+# LeRobot converted datasets
+data/

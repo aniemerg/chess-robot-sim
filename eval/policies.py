@@ -107,11 +107,66 @@ class OpenpiPolicy:
         return np.array(self.client.infer(payload)["actions"])
 
 
-def make_policy(name, host=None, port=8000, seed=0):
+class LeRobotPolicy:
+    """Runs a LeRobot π0.5 checkpoint LOCALLY (Apple-Silicon MPS or CUDA/CPU).
+
+    Intended for a checkpoint FINE-TUNED for our xArm chess robot (features:
+    observation.images.{base,wrist}, observation.state[5]; action[5]). The base
+    `lerobot/pi05_base` is a 3-cam / 32-dim generic model whose actions are NOT in
+    our units — fine-tune first (eval/convert_to_lerobot.py + lerobot-train).
+
+    NOTE: needs the gated google/paligemma-3b-pt-224 tokenizer — accept its license
+    once at https://huggingface.co/google/paligemma-3b-pt-224 (see the doc)."""
+    def __init__(self, model_path, device=None):
+        import torch
+        from lerobot.policies.pi05 import PI05Policy
+        from lerobot.policies.factory import make_pre_post_processors
+        self.torch = torch
+        self.np = np
+        self.device = torch.device(device or ("mps" if torch.backends.mps.is_available() else "cpu"))
+        self.policy = PI05Policy.from_pretrained(model_path).to(self.device).eval()
+        self.pre, self.post = make_pre_post_processors(
+            self.policy.config, model_path,
+            preprocessor_overrides={"device_processor": {"device": str(self.device)}})
+        self.img_keys = [k for k in self.policy.config.input_features if "image" in k]
+        sf = self.policy.config.input_features.get("observation.state")
+        self.state_dim = sf.shape[0] if sf is not None else 5
+        self.prompt = None
+
+    def reset(self, info):
+        self.prompt = info["task"]
+        if hasattr(self.policy, "reset"):
+            self.policy.reset()
+
+    def _decode(self, b64):
+        import base64, io
+        from PIL import Image
+        return self.np.asarray(Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB"), self.np.uint8)
+
+    def infer(self, obs):
+        imgs = [self._decode(obs["base"]), self._decode(obs["wrist"])]
+        st = self.np.asarray(obs["state"], self.np.float32)
+        if len(st) < self.state_dim:  # pad to the checkpoint's state dim
+            st = self.np.concatenate([st, self.np.zeros(self.state_dim - len(st), self.np.float32)])
+        frame = {"observation.state": st, "task": self.prompt}
+        for i, k in enumerate(self.img_keys):
+            frame[k] = imgs[min(i, len(imgs) - 1)]
+        batch = self.pre(frame)
+        with self.torch.inference_mode():
+            act = self.post(self.policy.select_action(batch))
+        arr = self.np.asarray(act.detach().cpu().numpy() if hasattr(act, "detach") else act)
+        if arr.ndim == 1:
+            arr = arr[None]
+        return arr[:, :5]  # our [x,y,z,yaw,gripper]
+
+
+def make_policy(name, host=None, port=8000, seed=0, model=None):
     if name == "oracle":
         return OraclePolicy()
     if name == "random":
         return RandomPolicy(seed=seed)
     if name == "openpi":
         return OpenpiPolicy(host=host or "localhost", port=port)
+    if name == "lerobot":
+        return LeRobotPolicy(model or "lerobot/pi05_base")
     raise ValueError(f"unknown policy: {name}")

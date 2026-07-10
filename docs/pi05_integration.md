@@ -26,34 +26,60 @@ action/observation format already matches π0.5's expected I/O for this robot.
   ```
 - **Server:** `uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_droid --policy.dir=...` (port 8000).
 
-## Feasibility on this Mac (Apple Silicon)
-- **Running the π0.5 model here: NOT feasible.** openpi inference needs an
-  **NVIDIA GPU (≥8 GB, e.g. RTX 4090)** and is "tested with Ubuntu 22.04; other
-  OSes not supported." No CUDA on Apple Silicon; the JAX/PyTorch stack + kernels
-  won't run. → The **model server must run on a GPU host** (Modal — as the post
-  used — or RunPod / Lambda / a Linux+NVIDIA box). See "Serving π0.5" below.
-- **Running here: everything else.** The sim (env), the eval harness, the
-  policy *client* (`openpi_client` is a light websocket+msgpack package, no CUDA),
-  and stub/oracle/random policies all run on the Mac. So we build and validate the
-  **entire closed loop locally against a stub policy**, then point the client at a
-  remote π0.5 server with a one-line host change.
+## Feasibility on this Mac (Apple Silicon) — UPDATED
 
-## ⚠️ Open blocker: a matching π0.5 checkpoint
-π0.5 checkpoints are **per-embodiment**. The public ones (`pi05_droid`,
-`pi05_libero`) have **different action spaces** (DROID ≈ 7-DOF, LIBERO) — their
-actions are meaningless for our 5-DOF `[x,y,z,yaw,gripper]` env, so a *base*
-checkpoint won't give a meaningful zero-shot baseline on our tasks. To evaluate
-π0.5 on our env we need a checkpoint whose action space is **our** robot's:
-1. **The post author's fine-tuned chess checkpoint** (not public — would be ideal;
-   it *is* the model we ultimately want to reproduce), or
-2. **Our own fine-tune**: define an openpi config for this xArm chess embodiment
-   (`action_dim=5`, our norm stats) and LoRA-fine-tune π0.5 on the real episodes
-   (and/or our synthetic ones) — this is the "later" step in the goal.
+**π0.5 DOES run on this Mac** via **Hugging Face LeRobot + PyTorch MPS** (the
+`openpi` repo itself is CUDA/Ubuntu-only, but LeRobot re-implements π0.5 with
+explicit MPS support). Verified on this machine (M2 Max, **103 GB** unified
+memory, macOS 15.7):
+- `lerobot` **0.6.1** + `torch` **2.11** installed in a **Python 3.12** venv
+  (`.venv/`; LeRobot needs ≥3.12, and the git clone needs `GIT_LFS_SKIP_SMUDGE=1`).
+- `torch.backends.mps.is_available() == True`; `PI05Config` auto-selects `mps`.
+- `PI05Policy.from_pretrained("lerobot/pi05_base")` loads on MPS (see
+  `eval/pi05_smoke.py`). The checkpoint is a full VLA (PaliGemma VLM + flow
+  action head), ~30+ GB on disk, comfortably within 103 GB RAM.
 
-**Implication for "baseline now":** the *pipeline* is fully built and validated
-with **oracle** (upper bound) and **random** (lower bound) policies. A real π0.5
-number requires (1) a GPU server and (2) a chess-embodiment checkpoint. Until then
-the harness is ready and the oracle/random baselines quantify the env itself.
+So we have **two** ways to run the model, and the eval harness supports both:
+1. **Local, on this Mac** (LeRobot MPS) — `--policy lerobot` (no server, no GPU box).
+2. **Remote GPU server** (openpi websocket) — `--policy openpi` — still useful for
+   speed or to stay on upstream openpi.
+
+π0.5 I/O (from `PI05Config`): outputs a **50-step action chunk**; state/action are
+padded to **32 dims** (our 5-DOF fits); STATE/ACTION use **quantile** normalization.
+Everything non-model (sim env, eval harness, oracle/random) also runs here.
+
+## ⚠️ Two things needed for a real π0.5 baseline
+
+### 1. Accept the PaliGemma license (one click — needs you) 🔑
+π0.5's language tokenizer pulls Google's **gated** `google/paligemma-3b-pt-224`.
+The model weights (`lerobot/pi05_base`, Apache-2.0) download + load on MPS fine,
+but `make_pre_post_processors` / inference fails with **403 gated repo** until the
+license is accepted. You (**niemerg**, already HF-logged-in on this Mac) just need
+to click **"Agree and access repository"** at
+<https://huggingface.co/google/paligemma-3b-pt-224>. After that,
+`.venv/bin/python eval/pi05_infer.py` should run a full forward pass on MPS.
+
+### 2. A checkpoint with OUR action space (fine-tune)
+`pi05_base` is a generic 3-cam / 32-dim model — its actions aren't in our units,
+so it won't zero-shot our robot. We need a checkpoint fine-tuned for this xArm
+chess embodiment (2 cams, 5-DOF `[x,y,z,yaw,gripper]`). The path is built:
+- **Convert** our episodes → LeRobotDataset: `eval/convert_to_lerobot.py`
+  (works on the real `rollouts/full/...` and our synthetic `synth/...`).
+- **Fine-tune on this Mac** (MPS) — π0.5 supports MPS training; use
+  `train_expert_only`/`gradient_checkpointing` for memory:
+  ```bash
+  .venv/bin/lerobot-train --policy.type=pi05 --policy.pretrained_path=lerobot/pi05_base \
+    --dataset.repo_id=chess_xarm/real_moves --dataset.root=data/lerobot/real_moves \
+    --policy.device=mps --policy.dtype=bfloat16 --policy.gradient_checkpointing=true \
+    --policy.train_expert_only=true --batch_size=1 --steps=3000 \
+    --policy.max_state_dim=32 --policy.max_action_dim=32 --output_dir=outputs/pi05_chess
+  ```
+  (MPS training of a 4B VLA is slow — expect this to be the long pole; a GPU box
+  is much faster. Start with a few hundred steps to validate the loop.)
+- **Eval locally:** `python eval/eval_chess.py --policy lerobot --lerobot-model outputs/pi05_chess/<ckpt>`.
+
+Until a fine-tuned checkpoint exists, the harness is validated with **oracle**
+(upper bound) and **random** (lower bound); those quantify the env itself.
 
 ## Architecture
 ```
@@ -89,33 +115,33 @@ the harness is ready and the oracle/random baselines quantify the env itself.
 - Client stays identical; only `--policy-host/--policy-port` change.
 
 ## Status (as of this session)
-**Done & validated on this Mac:**
+**Done & validated on this Mac (M2 Max, 103 GB):**
 - [x] Closed-loop sim env (`src/synth/env.ts` / `env.html`): reset/step/success,
       dynamic grasping, base+wrist obs, dataset-matched action/state units.
 - [x] Sim HTTP server (`tools/sim-server.mjs`, port 8010) wrapping the env.
 - [x] Python eval harness (`eval/`): `sim_client`, `policies`
-      (oracle/random/openpi), `tasks`, `eval_chess.py` (+ rollout video capture).
+      (oracle/random/openpi/**lerobot**), `tasks`, `eval_chess.py` (+ video capture).
 - [x] End-to-end validated: **oracle 100%**, **random 0%** on moves + pickups.
-- [x] `OpenpiPolicy` client wired to the openpi websocket API (obs keys, 224 resize,
-      unnormalized state, prompt) — ready; needs a server to talk to. **Verified:**
-      `openpi-client` pip-installs on this Mac (no CUDA) and its obs pipeline
-      (`resize_with_pad` → 224×224 uint8, `WebsocketClientPolicy`) imports/runs;
-      only the live server connection is outstanding.
+- [x] **π0.5 runs on this Mac (MPS)** — `lerobot` 0.6.1 + `torch` 2.11 in a Py3.12
+      venv; `PI05Policy.from_pretrained("lerobot/pi05_base")` loaded **4.14B params
+      on `mps:0`** (`eval/pi05_smoke.py`). Inputs: 3 cams (3×224×224) + 32-dim state;
+      output 32-dim × 50-step chunk.
+- [x] `LeRobotPolicy` (local MPS inference) wired into the eval (`--policy lerobot`).
+- [x] Fine-tune data path: `eval/convert_to_lerobot.py` → LeRobotDataset (tested on
+      real episodes; encodes base+wrist to video + 5-DOF state/action + task).
+- [x] `OpenpiPolicy` (remote GPU server) also wired + client verified installable.
 - [x] Modal GPU serving skeleton (`eval/serve_pi05_modal.py`).
 
-**Blocked (need a GPU host and/or a checkpoint — not this Mac):**
-- [ ] Run a real π0.5 server (NVIDIA GPU, Ubuntu). Model can't run on Apple Silicon.
-- [ ] A π0.5 checkpoint with **our** 5-DOF action space. Public checkpoints don't
-      match; options: get the post author's fine-tuned chess ckpt, or fine-tune our
-      own (openpi config for this embodiment + LoRA on the real/synthetic episodes).
-- [ ] Real π0.5 baseline number (needs both of the above).
+**Remaining (see the two blocks above):**
+- [ ] 🔑 **Accept the PaliGemma license** (one click, needs you) — unblocks full
+      inference: `.venv/bin/python eval/pi05_infer.py`.
+- [ ] Fine-tune a chess-embodiment checkpoint (convert → `lerobot-train` on MPS or a
+      GPU box), then `eval_chess.py --policy lerobot --lerobot-model <ckpt>` for the baseline.
 
-**Next steps when back / with a GPU:**
-1. Stand up a GPU box (Modal via the skeleton, or RunPod/Lambda).
-2. Obtain or fine-tune a chess-embodiment π0.5 checkpoint.
-3. `python eval/eval_chess.py --policy openpi --policy-host <host> --n 50` for the baseline.
-4. (Later) generate sim rollouts → fine-tune π0.5 → re-eval.
+**Env setup on this Mac (reproduce):** `uv venv .venv --python 3.12` then
+`GIT_LFS_SKIP_SMUDGE=1 uv pip install --python .venv/bin/python "lerobot[pi,dataset]@git+https://github.com/huggingface/lerobot.git"`.
 
-**Perf note:** each step is an HTTP roundtrip + 2 headless renders (~50–70 ms).
-A few hundred tasks is fine (~minutes–tens of minutes); for large sweeps, shrink
-obs images / batch / run the eval on the GPU box next to the server.
+**Perf notes:** π0.5 load on MPS is slow (~min after the ~30 GB download; cached
+after). Each sim step is an HTTP roundtrip + 2 headless renders (~50–70 ms). MPS
+inference latency of a 4B VLA is seconds/chunk — fine for eval, and a GPU box is
+faster for large sweeps or fine-tuning.
