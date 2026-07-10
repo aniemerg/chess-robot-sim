@@ -11,9 +11,10 @@ for the measured motion profile this reproduces.
 scenario.ts   (scenario, seed) -> scene spec + motion primitive + task + manifest
 motion.ts     primitive + params -> TRUE per-frame TCP path (phase machine @ measured speed)
 quantize.ts   true path -> sample-held `state` stream (recorder polling artifact)
-scene.ts      spec -> randomized Three.js scene (reuses xarm5 robot/board, pieces)
-generate.ts   entry: plan -> per-frame IK -> expose window.SYNTH { renderBase, renderWrist, frames, manifest }
-rng.ts        one seed -> all sampling (fully reproducible from the manifest)
+scene.ts        spec -> randomized Three.js scene (reuses xarm5 robot/board)
+piece_models.ts pluggable piece sets: procedural_lathe + sourced glTF/GLB sets
+generate.ts     entry: plan -> per-frame IK -> expose window.SYNTH { renderBase, renderWrist, frames, manifest }
+rng.ts          one seed -> all sampling (fully reproducible from the manifest)
 ```
 
 The **image** is rendered at the true pose for every frame; the logged **state**
@@ -32,7 +33,13 @@ mp4 is written next to the dataset for eyeballing.
 
 Scenarios (parametric core, plan §3): `queen_move`, `queen_move_yaw90`,
 `table_pickup`. Open `synth.html?scenario=&seed=` in the dev server to inspect
-one interactively.
+one interactively. Append `&set=<id>` (or a 6th CLI arg) to force a piece set.
+
+**Piece models** (`piece_models.ts`): episodes randomly draw a set. Available:
+`procedural_lathe` (in-repo Staunton) and `polyhaven_chess_set` (CC0, Poly Haven,
+per-piece nodes extracted + normalized). glTF/GLB sets drop into
+`public/assets/pieces/<set>/` + an entry in `GLTF_SETS`; each is logged with its
+license in the manifest. The wrist camera is **not** randomized (fixed mount).
 
 ## Status & known gaps (first slice)
 
@@ -44,5 +51,5 @@ validation harness, plan §6):
 - **Pickup duration** ~3.4 s is short vs real pickups (8–31 s); add longer
   inspect holds.
 - Randomization is the near-real ("in_distribution") tier only; the wide-aug
-  tier, sourced GLB piece sets, background clutter, and sensor noise are not
-  wired yet (plan §5).
+  tier, background clutter, and sensor noise are not wired yet (plan §5).
+  (Sourced glTF piece sets ARE wired — see `piece_models.ts`.)

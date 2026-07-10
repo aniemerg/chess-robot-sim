@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { Xarm5Robot } from "../xarm5/robot";
-import { createPiece, PieceType, PieceColor } from "../pieces";
+import { PieceType, PieceColor } from "../pieces";
 import { buildBoard, BOARD_TOP, makeFloorTexture } from "../xarm5/board";
+import { makePiece } from "./piece_models";
 import { Rng, uniform, gauss } from "./rng";
 
 /**
@@ -25,6 +26,7 @@ export interface LightingSpec {
 export interface PieceSpec {
   type: PieceType;
   color: PieceColor;
+  model: string; // piece-set id (procedural_lathe | polyhaven_chess_set | ...)
   tint: number; // multiply color (hex) for shade variation
   roughness: number;
   metalness: number;
@@ -61,13 +63,15 @@ function recolorPiece(piece: THREE.Group, spec: PieceSpec): void {
     const src = mesh.material as THREE.MeshStandardMaterial;
     const m = src.clone();
     m.color = src.color.clone().multiply(tint);
-    m.roughness = spec.roughness;
-    m.metalness = spec.metalness;
+    // Only override scalar roughness/metalness when the material has no PBR maps
+    // (procedural pieces). For sourced glTF sets, keep their maps intact.
+    if (!m.roughnessMap) m.roughness = spec.roughness;
+    if (!m.metalnessMap) m.metalness = spec.metalness;
     mesh.material = m;
   });
 }
 
-export function buildScene(spec: SceneSpec, rng: Rng): BuiltScene {
+export async function buildScene(spec: SceneSpec, rng: Rng): Promise<BuiltScene> {
   const scene = new THREE.Scene();
   const TABLE = 0xcdb488;
   scene.background = new THREE.Color(TABLE).multiplyScalar(uniform(rng, 0.8, 0.9));
@@ -103,7 +107,7 @@ export function buildScene(spec: SceneSpec, rng: Rng): BuiltScene {
     scene.add(bg);
   }
 
-  const piece = createPiece(spec.piece.type, spec.piece.color);
+  const piece = await makePiece(spec.piece.model, spec.piece.type, spec.piece.color);
   recolorPiece(piece, spec.piece);
   piece.rotation.x = Math.PI / 2; // stand up in Z-up frame
   piece.scale.setScalar(spec.piece.scale);

@@ -15,6 +15,7 @@ const scenario = process.argv[2] || "queen_move";
 const seed = Number(process.argv[3] ?? "1");
 const index = Number(process.argv[4] ?? "0");
 const dataset = process.argv[5] || `synth_${scenario}`;
+const set = process.argv[6] || ""; // optional piece-set override
 const PORT = 4319;
 
 const portUp = (port) => new Promise((res) => {
@@ -35,7 +36,8 @@ const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: 900, height: 320 } })).newPage();
 const errs = [];
 page.on("pageerror", (e) => errs.push(String(e).split("\n")[0]));
-await page.goto(`http://localhost:${PORT}/synth.html?scenario=${scenario}&seed=${seed}&index=${index}`, { waitUntil: "commit", timeout: 30000 });
+const setQ = set ? `&set=${set}` : "";
+await page.goto(`http://localhost:${PORT}/synth.html?scenario=${scenario}&seed=${seed}&index=${index}${setQ}`, { waitUntil: "commit", timeout: 30000 });
 await page.waitForFunction(() => window.SYNTH && window.SYNTH.ready, { timeout: 90000 });
 
 const meta = await page.evaluate(() => ({ n: window.SYNTH.numFrames, episode: window.SYNTH.episode, frames: window.SYNTH.frames, manifest: window.SYNTH.manifest, stats: window.SYNTH.stats }));

@@ -241,8 +241,10 @@ Deliberately no scale/compute plan yet — that's premature. Sequence:
 
 ## 9. Open decisions to confirm
 
-1. **Piece sources**: OK to pull CC-licensed GLB sets from poly.pizza / Sketchfab
-   (attribution kept in-repo), or do you want a specific/curated set?
+1. **Piece sources**: RESOLVED — pull CC-licensed sets online. First set wired:
+   `polyhaven_chess_set` (CC0, Poly Haven) via `src/synth/piece_models.ts`, with
+   `procedural_lathe` as the fallback. More sets can drop into
+   `public/assets/pieces/<set>/`. (Add novelty sets next.)
 2. **Wide-augmentation tier**: keep a two-tier (near-real jitter vs wide swings)
    scheme; what rough fraction goes "wide" (can defer until we see a few).
 3. **Board realism**: the real boards are fairly plain — how far to push board

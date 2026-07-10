@@ -4,6 +4,7 @@ import { buildScene } from "./scene";
 import { plan } from "./motion";
 import { sampleHold, duplicateFraction, LoggedFrame } from "./quantize";
 import { mulberry32 } from "./rng";
+import { pieceSetLicense } from "./piece_models";
 
 /**
  * Synthetic episode entry point (loaded by synth.html). Resolves a scenario +
@@ -24,6 +25,15 @@ const index = Number(params.get("index") ?? "0");
 
 const ep = resolveScenario(scenario, seed);
 
+// Optional piece-set override (testing / targeted generation), e.g. &set=polyhaven_chess_set
+const setOverride = params.get("set");
+if (setOverride) {
+  ep.spec.piece.model = setOverride;
+  const p0 = (ep.manifest.pieces as Array<Record<string, unknown>>)[0];
+  p0.model = setOverride;
+  p0.license = pieceSetLicense(setOverride);
+}
+
 // --- Renderer (single 320x240 target, one camera at a time) -----------------
 const canvas = (document.getElementById("out") as HTMLCanvasElement) ?? document.createElement("canvas");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -32,7 +42,7 @@ renderer.setSize(IMG_W, IMG_H, false);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-const built = buildScene(ep.spec, mulberry32(seed ^ 0x9e3779b9));
+const built = await buildScene(ep.spec, mulberry32(seed ^ 0x9e3779b9));
 const { scene, robot, overhead, wrist, piece, tableZ } = built;
 
 // --- Plan motion + solve IK per true frame ----------------------------------

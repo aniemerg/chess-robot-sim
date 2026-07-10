@@ -3,6 +3,7 @@ import { squareCenter } from "../xarm5/board";
 import { PieceType, PieceColor } from "../pieces";
 import { Primitive, MotionParams, sampleMotionParams } from "./motion";
 import { SceneSpec, sampleSceneRandomization, CameraSpec } from "./scene";
+import { PIECE_SET_IDS, pieceSetLicense } from "./piece_models";
 import { Rng, mulberry32, uniform, gauss, pick, randInt } from "./rng";
 
 /**
@@ -38,6 +39,7 @@ function samplePieceSpec(rng: Rng, type: PieceType, color: PieceColor) {
   return {
     type,
     color,
+    model: pick(rng, PIECE_SET_IDS), // procedural or a sourced set
     tint: sampleTint(rng, color),
     roughness: uniform(rng, 0.42, 0.6),
     metalness: uniform(rng, 0.05, 0.2),
@@ -121,7 +123,8 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
     pieces: [{
       type: pieceType,
       color,
-      model: "procedural_lathe", // sourced-GLB sets slot in here later
+      model: pieceSpec.model,
+      license: pieceSetLicense(pieceSpec.model),
       tint: `#${pieceSpec.tint.toString(16).padStart(6, "0")}`,
       roughness: +pieceSpec.roughness.toFixed(3),
       metalness: +pieceSpec.metalness.toFixed(3),
