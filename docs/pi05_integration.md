@@ -97,7 +97,10 @@ the harness is ready and the oracle/random baselines quantify the env itself.
       (oracle/random/openpi), `tasks`, `eval_chess.py` (+ rollout video capture).
 - [x] End-to-end validated: **oracle 100%**, **random 0%** on moves + pickups.
 - [x] `OpenpiPolicy` client wired to the openpi websocket API (obs keys, 224 resize,
-      unnormalized state, prompt) — ready; needs a server to talk to.
+      unnormalized state, prompt) — ready; needs a server to talk to. **Verified:**
+      `openpi-client` pip-installs on this Mac (no CUDA) and its obs pipeline
+      (`resize_with_pad` → 224×224 uint8, `WebsocketClientPolicy`) imports/runs;
+      only the live server connection is outstanding.
 - [x] Modal GPU serving skeleton (`eval/serve_pi05_modal.py`).
 
 **Blocked (need a GPU host and/or a checkpoint — not this Mac):**
