@@ -46,11 +46,17 @@ export interface MotionParams {
   pickupTargetDur?: number; // s, target total duration for pickups (real range 13-31s)
 }
 
+export interface Waypoint {
+  pos: [number, number, number]; // mm
+  label: string;
+}
+
 export interface PlanResult {
   frames: TrueFrame[]; // true per-frame poses (mm/deg)
   duration: number; // s
   graspFrame: number; // frame index where the gripper has closed on the piece
   releaseFrame: number; // frame index where it reopens (move); -1 for pickup
+  waypoints: Waypoint[]; // key phase poses, for visualization
 }
 
 interface Segment {
@@ -80,10 +86,12 @@ export function sampleMotionParams(rng: Rng, yawDeg: number): MotionParams {
 }
 
 /** Build the timed segment list for a primitive, tagging grasp/release times. */
-function buildSegments(p: Primitive, m: MotionParams, rng: Rng): { segs: Segment[]; graspT: number; releaseT: number } {
+function buildSegments(p: Primitive, m: MotionParams, rng: Rng): { segs: Segment[]; graspT: number; releaseT: number; waypoints: Waypoint[] } {
   const O = m.gripperOpen, C = m.gripperClosed, Y = m.yawDeg;
   const [gx, gy] = p.graspXY;
   const gZ = p.graspZ;
+  const waypoints: Waypoint[] = [];
+  const key = (label: string, pose: Pose) => waypoints.push({ pos: [pose.x, pose.y, pose.z], label });
   const home: Pose = { x: m.home[0], y: m.home[1], z: m.home[2], yaw: 0, grip: O };
   const aboveGrasp = (yaw: number, grip: number): Pose => ({ x: gx, y: gy, z: m.travelZ, yaw, grip });
   const atGrasp = (yaw: number, grip: number): Pose => ({ x: gx, y: gy, z: gZ, yaw, grip });
@@ -91,17 +99,23 @@ function buildSegments(p: Primitive, m: MotionParams, rng: Rng): { segs: Segment
   const segs: Segment[] = [];
   const spatial = (from: Pose, to: Pose) => segs.push({ from, to, dur: Math.max(1e-3, dist3(from, to) / m.speed) });
   const hold = (pose: Pose, to: Pose, dur: number) => segs.push({ from: pose, to, dur });
-  // Slow wandering motion around a center for `dur` seconds (the teleoperator
-  // repositioning) — fills long pickup phases WITHOUT freezing the frames.
-  // Returns to `center` so the next phase connects cleanly.
-  const wander = (center: Pose, rXY: number, rZ: number, dur: number): void => {
-    const steps = Math.max(1, Math.round(dur / 1.6));
+  // Slow SMOOTH drift around a center for `dur` seconds (the teleoperator holding
+  // roughly still) — fills long pickup phases without freezing the frames and
+  // without the jitter of random waypoints. Sum of low-frequency sines, enveloped
+  // so it starts and ends at `center`; z is clamped to `zMin` (no clipping).
+  const smoothDrift = (center: Pose, ampXY: number, ampZ: number, dur: number, zMin: number): void => {
+    if (dur <= 0) return;
+    const px = uniform(rng, 3.5, 6), py = uniform(rng, 4, 6.5), pz = uniform(rng, 4.5, 7);
+    const phx = rng() * 6.283, phy = rng() * 6.283, phz = rng() * 6.283;
+    const steps = Math.max(2, Math.round(dur / 0.4)); // fine sampling -> smooth
     let prev = center;
-    for (let s = 0; s < steps; s++) {
-      const to: Pose = s === steps - 1 ? center : {
-        x: center.x + (rng() - 0.5) * 2 * rXY,
-        y: center.y + (rng() - 0.5) * 2 * rXY,
-        z: center.z + (rng() - 0.5) * 2 * rZ,
+    for (let s = 1; s <= steps; s++) {
+      const t = (s / steps) * dur;
+      const env = Math.min(1, t / 1.2) * Math.min(1, (dur - t) / 1.2); // ease in/out
+      const to: Pose = {
+        x: center.x + ampXY * Math.sin((2 * Math.PI * t) / px + phx) * env,
+        y: center.y + ampXY * Math.sin((2 * Math.PI * t) / py + phy) * env,
+        z: Math.max(zMin, center.z + ampZ * Math.sin((2 * Math.PI * t) / pz + phz) * env),
         yaw: center.yaw,
         grip: center.grip,
       };
@@ -126,10 +140,22 @@ function buildSegments(p: Primitive, m: MotionParams, rng: Rng): { segs: Segment
   }
 
   // Approach: home -> above grasp (yaw blends 0 -> Y) -> descend to grasp.
+  key("home", home);
+  key("approach (travel height over piece)", aboveGrasp(Y, O));
   spatial(home, aboveGrasp(Y, O));
-  spatial(aboveGrasp(Y, O), atGrasp(Y, O));
-  if (hoverLow > 0) wander(atGrasp(Y, O), 18, 6, hoverLow); // slow low-z hover/reposition before grasp
+  if (p.kind === "pickup" && hoverLow > 0) {
+    // Hover ABOVE the piece (not at grasp height) so the gentle drift can't clip
+    // the piece or the table, then make a clean final descent to the grasp.
+    const hoverZ = gZ + 45;
+    const hoverPose: Pose = { x: gx, y: gy, z: hoverZ, yaw: Y, grip: O };
+    spatial(aboveGrasp(Y, O), hoverPose);
+    smoothDrift(hoverPose, 12, 10, hoverLow, gZ + 22);
+    spatial(hoverPose, atGrasp(Y, O));
+  } else {
+    spatial(aboveGrasp(Y, O), atGrasp(Y, O));
+  }
   // Close on the piece (grip O -> C), then settle. graspT = end of the close ramp.
+  key("grasp (descend, close gripper)", atGrasp(Y, C));
   hold(atGrasp(Y, O), atGrasp(Y, C), m.dwellClose);
   let acc = segs.reduce((s, g) => s + g.dur, 0);
   const graspT = acc;
@@ -140,6 +166,9 @@ function buildSegments(p: Primitive, m: MotionParams, rng: Rng): { segs: Segment
     const [px, py] = p.placeXY, pZ = p.placeZ;
     const abovePlace = (grip: number): Pose => ({ x: px, y: py, z: m.travelZ, yaw: Y, grip });
     const atPlace = (grip: number): Pose => ({ x: px, y: py, z: pZ, yaw: Y, grip });
+    key("lift to travel height", aboveGrasp(Y, C));
+    key("traverse to target", abovePlace(C));
+    key("place (descend, open gripper)", atPlace(O));
     spatial(atGrasp(Y, C), aboveGrasp(Y, C)); // lift
     spatial(aboveGrasp(Y, C), abovePlace(C)); // traverse
     spatial(abovePlace(C), atPlace(C)); // descend to place
@@ -149,18 +178,20 @@ function buildSegments(p: Primitive, m: MotionParams, rng: Rng): { segs: Segment
     hold(atPlace(O), atPlace(O), m.settle);
     spatial(atPlace(O), abovePlace(O)); // lift
     spatial(abovePlace(O), { ...home, yaw: 0 }); // return home (yaw Y -> 0)
+    key("retract to home", { ...home, yaw: 0 });
   } else {
     // Pickup: lift high and hold (no place).
     const liftZ = p.pickupLiftZ ?? 364;
     const high: Pose = { x: gx, y: gy, z: liftZ, yaw: Y, grip: C };
+    key("lift high and hold", high);
     spatial(atGrasp(Y, C), high);
-    wander(high, 22, 14, holdHigh); // slow inspection movement at the top (not frozen)
+    smoothDrift(high, 20, 16, holdHigh, high.z - 40); // gentle inspection drift at the top (high up, no clip)
   }
-  return { segs, graspT, releaseT };
+  return { segs, graspT, releaseT, waypoints };
 }
 
 export function plan(p: Primitive, m: MotionParams, rng: Rng): PlanResult {
-  const { segs, graspT, releaseT } = buildSegments(p, m, rng);
+  const { segs, graspT, releaseT, waypoints } = buildSegments(p, m, rng);
   const starts: number[] = [];
   let total = 0;
   for (const s of segs) {
@@ -195,5 +226,5 @@ export function plan(p: Primitive, m: MotionParams, rng: Rng): PlanResult {
     for (let i = 0; i < frames.length; i++) if (frames[i].t <= time) idx = i; else break;
     return idx;
   };
-  return { frames, duration: total, graspFrame: frameForTime(graspT), releaseFrame: frameForTime(releaseT) };
+  return { frames, duration: total, graspFrame: frameForTime(graspT), releaseFrame: frameForTime(releaseT), waypoints };
 }
