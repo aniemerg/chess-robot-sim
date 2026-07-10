@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { squareCenter } from "../xarm5/board";
-import { PieceType, PieceColor } from "../pieces";
+import { PieceType, PieceColor, pieceHeight } from "../pieces";
 import { Primitive, MotionParams, sampleMotionParams } from "./motion";
 import { SceneSpec, sampleSceneRandomization, CameraSpec } from "./scene";
 import { PIECE_SET_IDS, pieceSetLicense } from "./piece_models";
@@ -17,7 +17,6 @@ const BASE_YAW_OFFSET = -Math.PI / 2; // calibration offset validated in replay.
 
 // Calibrated overhead presets to jitter around (from episodes.ts).
 const OVERHEAD_BOARD: CameraSpec = { pos: [0.4667, 0.4617, 0.9797], target: [0.4226, 0.0223, 0.2235], fov: 44 };
-const OVERHEAD_TABLE: CameraSpec = { pos: [0.3841, 1.2798, 0.5641], target: [0.4226, 0.0223, 0.2235], fov: 44 };
 
 const FILES = "abcdefgh";
 const sqName = (f: number, r: number) => `${FILES[f]}${r + 1}`;
@@ -66,7 +65,10 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
   let board: boolean, pieceType: PieceType, color: PieceColor;
   let baseOverhead: CameraSpec, pieceStartMM: [number, number];
   let yawDeg = 0;
-  const graspZ = gauss(rng, 46, 1.2);
+  // Grasp height scales with the piece: ~46mm for the queen (matches real), less
+  // for shorter pieces, so the fingers always close on the piece body (not above
+  // it). This also keeps the piece near the fingertips in the wrist view.
+  const graspHeight = (t: PieceType) => pieceHeight(t) * 1000 * uniform(rng, 0.66, 0.72);
 
   if (scenario === "queen_move" || scenario === "queen_move_yaw90") {
     board = true;
@@ -81,18 +83,21 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
     const from = sqName(ff, fr), to = sqName(tf, tr);
     pieceStartMM = sqMM(ff, fr);
     const placeMM = sqMM(tf, tr);
+    const graspZ = graspHeight("queen");
     template = "move the {color} {piece} from {A} to {B}";
     task = `move the ${color} ${pieceType} from ${from} to ${to}`;
-    primitive = { kind: "move", graspXY: pieceStartMM, placeXY: placeMM, graspZ, placeZ: gauss(rng, 46, 1.2) };
+    primitive = { kind: "move", graspXY: pieceStartMM, placeXY: placeMM, graspZ, placeZ: graspZ + gauss(rng, 0, 0.8) };
   } else if (scenario === "table_pickup") {
     board = false;
     pieceType = pick(rng, PICKUP_PIECES.filter((p) => p !== "queen")); // non-queen (like real)
     color = pick(rng, ["white", "black"] as PieceColor[]);
-    baseOverhead = OVERHEAD_TABLE;
     pieceStartMM = [gauss(rng, 245, 30), gauss(rng, -10, 130)];
+    // Frame the overhead on the piece region (not the whole arm from 1.3m away).
+    const px = pieceStartMM[0] / 1000, py = pieceStartMM[1] / 1000;
+    baseOverhead = { pos: [px, py + 0.5, 0.52], target: [px, py, 0.24], fov: 40 };
     template = "pick up the {color} {piece}";
     task = `pick up the ${color} ${pieceType}`;
-    primitive = { kind: "pickup", graspXY: pieceStartMM, graspZ: gauss(rng, 42, 3), pickupLiftZ: gauss(rng, 364, 8) };
+    primitive = { kind: "pickup", graspXY: pieceStartMM, graspZ: graspHeight(pieceType), pickupLiftZ: gauss(rng, 364, 8) };
   } else {
     throw new Error(`unknown scenario: ${scenario}`);
   }
@@ -109,7 +114,7 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
     overhead: rand.overhead,
     wristTilt: rand.wristTilt,
     lighting: rand.lighting,
-    floorRoughness: rand.floorRoughness,
+    floor: rand.floor,
     toolYawOffsetRad: BASE_YAW_OFFSET + (yawDeg * Math.PI) / 180,
   };
 
@@ -133,7 +138,17 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
       graspMM: primitive.graspXY.map((v) => +v.toFixed(1)),
       placeMM: primitive.placeXY ? primitive.placeXY.map((v) => +v.toFixed(1)) : null,
     }],
-    scene: { board, boardOffset: rand.boardOffset, floorRoughness: +rand.floorRoughness.toFixed(3) },
+    scene: {
+      board,
+      boardOffset: rand.boardOffset,
+      floor: {
+        family: rand.floor.family,
+        color: `#${rand.floor.color.toString(16).padStart(6, "0")}`,
+        roughness: +rand.floor.roughness.toFixed(3),
+        repeat: +rand.floor.repeat.toFixed(2),
+        rotationDeg: +rand.floor.rotationDeg.toFixed(1),
+      },
+    },
     motion: {
       yawDeg,
       travelZ: +motion.travelZ.toFixed(1),

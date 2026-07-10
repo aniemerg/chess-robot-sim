@@ -62,4 +62,6 @@ validation harness, plan §6):
   inspect holds.
 - Randomization is the near-real ("in_distribution") tier only; the wide-aug
   tier, background clutter, and sensor noise are not wired yet (plan §5).
-  (Sourced glTF piece sets ARE wired — see `piece_models.ts`.)
+  (Sourced glTF piece sets and floor/table finish variation ARE wired.)
+- Grasp height is piece-dependent (~0.7x piece height) so the fingers close on
+  the piece body; the pickup overhead frames the piece region up close.

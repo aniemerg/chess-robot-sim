@@ -3,7 +3,7 @@ import { Xarm5Robot } from "../xarm5/robot";
 import { PieceType, PieceColor } from "../pieces";
 import { buildBoard, BOARD_TOP, makeFloorTexture } from "../xarm5/board";
 import { makePiece } from "./piece_models";
-import { Rng, uniform, gauss } from "./rng";
+import { Rng, uniform, gauss, pick, chance } from "./rng";
 
 /**
  * Build a randomized synthetic scene (robot + table/board + piece + lights +
@@ -32,6 +32,14 @@ export interface PieceSpec {
   metalness: number;
   scale: number;
 }
+export interface FloorSpec {
+  family: "wood" | "plain";
+  color: number; // hex tint / solid color
+  roughness: number;
+  repeat: number; // texture tiling (wood)
+  rotationDeg: number; // texture rotation (wood)
+  bgScale: number; // background = floor color * bgScale
+}
 export interface SceneSpec {
   board: boolean;
   boardOffset: { x: number; y: number; yaw: number };
@@ -40,7 +48,7 @@ export interface SceneSpec {
   overhead: CameraSpec;
   wristTilt: number; // deg
   lighting: LightingSpec;
-  floorRoughness: number;
+  floor: FloorSpec;
   toolYawOffsetRad: number; // J5 grip-plane azimuth (BASE + data yaw)
 }
 
@@ -71,10 +79,10 @@ function recolorPiece(piece: THREE.Group, spec: PieceSpec): void {
   });
 }
 
-export async function buildScene(spec: SceneSpec, rng: Rng): Promise<BuiltScene> {
+export async function buildScene(spec: SceneSpec, _rng: Rng): Promise<BuiltScene> {
   const scene = new THREE.Scene();
-  const TABLE = 0xcdb488;
-  scene.background = new THREE.Color(TABLE).multiplyScalar(uniform(rng, 0.8, 0.9));
+  // Background wall tinted from the floor color so the scene reads coherently.
+  scene.background = new THREE.Color(spec.floor.color).multiplyScalar(spec.floor.bgScale);
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0xa8a99c, spec.lighting.hemi));
   const key = new THREE.DirectionalLight(0xffffff, spec.lighting.keyIntensity);
@@ -87,10 +95,15 @@ export async function buildScene(spec: SceneSpec, rng: Rng): Promise<BuiltScene>
   scene.add(key);
   scene.add(new THREE.DirectionalLight(0xffffff, spec.lighting.fillIntensity));
 
-  const desk = new THREE.Mesh(
-    new THREE.PlaneGeometry(4, 4),
-    new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: spec.floorRoughness })
-  );
+  const deskMat = new THREE.MeshStandardMaterial({ color: spec.floor.color, roughness: spec.floor.roughness });
+  if (spec.floor.family === "wood") {
+    const tex = makeFloorTexture();
+    tex.center.set(0.5, 0.5);
+    tex.rotation = (spec.floor.rotationDeg * Math.PI) / 180;
+    tex.repeat.set(spec.floor.repeat, spec.floor.repeat);
+    deskMat.map = tex; // color multiplies the grain -> varied wood tones
+  }
+  const desk = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), deskMat);
   desk.position.z = -0.004;
   desk.receiveShadow = true;
   scene.add(desk);
@@ -129,13 +142,38 @@ export async function buildScene(spec: SceneSpec, rng: Rng): Promise<BuiltScene>
   return { scene, robot, overhead, wrist, piece, tableZ };
 }
 
+const WOOD_COLORS = [0xc8a678, 0xb98a55, 0xd8b98a, 0xa9825a, 0x9c7248, 0xcbb086, 0x8f6b47, 0xdcc39a];
+const PLAIN_COLORS = [0x8a8f96, 0x6f7580, 0xb7b2a6, 0x556b5a, 0x7a6f63, 0x9aa0a6, 0x3f4650, 0xa89c86, 0x4a5a6a];
+
+/** Sample a floor/table finish: varied wood tones or a plain solid surface. */
+function sampleFloor(rng: Rng): FloorSpec {
+  if (chance(rng, 0.6)) {
+    return {
+      family: "wood",
+      color: pick(rng, WOOD_COLORS),
+      roughness: uniform(rng, 0.7, 0.92),
+      repeat: uniform(rng, 1.8, 3.6),
+      rotationDeg: uniform(rng, 0, 90),
+      bgScale: uniform(rng, 0.75, 0.95),
+    };
+  }
+  return {
+    family: "plain",
+    color: pick(rng, PLAIN_COLORS),
+    roughness: uniform(rng, 0.5, 0.95),
+    repeat: 1,
+    rotationDeg: 0,
+    bgScale: uniform(rng, 0.7, 0.95),
+  };
+}
+
 /** Sample near-real lighting/camera/floor jitter around the calibrated setup. */
 export function sampleSceneRandomization(
   rng: Rng,
   base: { overhead: CameraSpec; wristTilt: number }
 ): {
   lighting: LightingSpec;
-  floorRoughness: number;
+  floor: FloorSpec;
   overhead: CameraSpec;
   wristTilt: number;
   boardOffset: { x: number; y: number; yaw: number };
@@ -147,7 +185,7 @@ export function sampleSceneRandomization(
       keyPos: [gauss(rng, 0.4, 0.15), gauss(rng, -0.3, 0.15), gauss(rng, 1.6, 0.2)],
       fillIntensity: gauss(rng, 0.3, 0.06),
     },
-    floorRoughness: uniform(rng, 0.82, 0.95),
+    floor: sampleFloor(rng),
     // Overhead is an EXTERNAL camera whose pose varies per real setup — jitter it.
     overhead: {
       pos: [
