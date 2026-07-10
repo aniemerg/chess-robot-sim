@@ -16,8 +16,11 @@ export const ENGINE_VERSION = "synth-0.1";
 const BASE_YAW_OFFSET = -Math.PI / 2; // calibration offset validated in replay.ts
 
 // Calibrated overhead presets to jitter around (from episodes.ts).
-const OVERHEAD_BOARD: CameraSpec = { pos: [0.4667, 0.4617, 0.9797], target: [0.4226, 0.0223, 0.2235], fov: 44 };
+// Overhead framed to keep the whole chessboard footprint in view with margin
+// (used for board moves AND bare-table pickups, so the framing is consistent).
+const OVERHEAD_BOARD: CameraSpec = { pos: [0.4667, 0.4617, 0.9797], target: [0.4226, 0.0223, 0.2235], fov: 52 };
 
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const FILES = "abcdefgh";
 const sqName = (f: number, r: number) => `${FILES[f]}${r + 1}`;
 const sqMM = (f: number, r: number): [number, number] => {
@@ -87,14 +90,14 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
     template = "move the {color} {piece} from {A} to {B}";
     task = `move the ${color} ${pieceType} from ${from} to ${to}`;
     primitive = { kind: "move", graspXY: pieceStartMM, placeXY: placeMM, graspZ, placeZ: graspZ + gauss(rng, 0, 0.8) };
-  } else if (scenario === "table_pickup") {
+  } else if (scenario === "table_pickup" || scenario === "table_pickup_slow") {
     board = false;
     pieceType = pick(rng, PICKUP_PIECES.filter((p) => p !== "queen")); // non-queen (like real)
     color = pick(rng, ["white", "black"] as PieceColor[]);
-    pieceStartMM = [gauss(rng, 245, 30), gauss(rng, -10, 130)];
-    // Frame the overhead on the piece region (not the whole arm from 1.3m away).
-    const px = pieceStartMM[0] / 1000, py = pieceStartMM[1] / 1000;
-    baseOverhead = { pos: [px, py + 0.5, 0.52], target: [px, py, 0.24], fov: 40 };
+    // Place the piece within the chessboard's footprint so the workspace framing
+    // (which keeps the board area in view even when no board is present) contains it.
+    pieceStartMM = [clamp(gauss(rng, 456, 110), 285, 620), clamp(gauss(rng, 17, 110), -175, 190)];
+    baseOverhead = OVERHEAD_BOARD; // frame the board-footprint region, board present or not
     template = "pick up the {color} {piece}";
     task = `pick up the ${color} ${pieceType}`;
     primitive = { kind: "pickup", graspXY: pieceStartMM, graspZ: graspHeight(pieceType), pickupLiftZ: gauss(rng, 364, 8) };
@@ -103,9 +106,10 @@ export function resolveScenario(scenario: string, seed: number): ResolvedEpisode
   }
 
   const motion = sampleMotionParams(rng, yawDeg);
-  // Pickups run long in the real data (13.5-31.5s, mean ~22): sample a target in
-  // that range so synthetic pickups match within the real spread.
-  if (primitive.kind === "pickup") motion.pickupTargetDur = Math.max(13.5, Math.min(31.5, gauss(rng, 22, 4.5)));
+  // Pickups are FAST by default (approach -> grasp -> lift -> brief hold). The
+  // slow, long-hover variant (matching the real 13.5-31.5s pickups) is gated
+  // behind the explicit `table_pickup_slow` scenario.
+  if (scenario === "table_pickup_slow") motion.pickupTargetDur = clamp(gauss(rng, 22, 4.5), 13.5, 31.5);
   const rand = sampleSceneRandomization(rng, { overhead: baseOverhead, wristTilt: 2 });
   const pieceSpec = samplePieceSpec(rng, pieceType, color);
 

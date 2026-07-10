@@ -1,109 +1,120 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>xArm 5 Chessboard Simulator</title>
-    <link rel="stylesheet" href="/src/style.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Synthetic Scenario Viewer</title>
+    <style>
+      :root { --bg:#14171c; --panel:#1c2027; --line:#2c323c; --fg:#cfd4da; --accent:#6ea8fe; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.5 system-ui, sans-serif; }
+      #task { padding: 10px 16px; font-size: 18px; font-weight: 650; background: linear-gradient(90deg,#20304a,#1c2027); border-bottom: 1px solid var(--line); }
+      #task .kind { font-size: 12px; font-weight: 500; color: #9fb4d8; margin-left: 10px; }
+      #wrap { display: flex; gap: 14px; padding: 14px; align-items: flex-start; }
+      #left { flex: 0 0 auto; }
+      #right { flex: 1 1 auto; min-width: 320px; max-width: 560px; }
+      canvas#main { width: 640px; height: 460px; border: 1px solid var(--line); border-radius: 6px; background:#0d0f13; display:block; }
+      #cams { display: flex; gap: 10px; margin-top: 10px; }
+      .cam { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+      .cam h4 { margin: 0; padding: 4px 8px; font-size: 11px; font-weight: 600; color:#9aa0a6; background:#0d0f13; border-bottom: 1px solid var(--line); }
+      .cam canvas { width: 300px; height: 225px; display: block; }
+      .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+      label { color:#9aa0a6; }
+      select, input[type=number], button { background:#0f1319; color: var(--fg); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; font: inherit; }
+      button { cursor: pointer; }
+      button.primary { background: var(--accent); color:#06122b; border-color: var(--accent); font-weight: 600; }
+      button:hover { border-color: var(--accent); }
+      #scrub { width: 100%; }
+      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; }
+      details { border: 1px solid var(--line); border-radius: 6px; margin-bottom: 8px; background: var(--panel); }
+      details > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; color:#c7d0dc; user-select: none; }
+      details[open] > summary { border-bottom: 1px solid var(--line); }
+      pre { margin: 0; padding: 10px 12px; max-height: 320px; overflow: auto; font: 11.5px/1.45 ui-monospace, monospace; color:#c2d0c2; white-space: pre-wrap; }
+      .toggles label { color: var(--fg); margin-right: 12px; user-select: none; }
+      .kv { font: 11.5px ui-monospace, monospace; }
+      .phase { display:inline-block; padding:2px 8px; border-radius: 10px; background:#243b5e; color:#bcd3ff; font-size: 11px; }
+      .hint { color:#7f8794; font-size: 11.5px; }
+      .legend span { display:inline-flex; align-items:center; gap:5px; margin-right: 10px; font-size: 11px; }
+      .dot { width:10px; height:10px; border-radius: 50%; display:inline-block; }
+      h3 { margin: 2px 0 8px; font-size: 13px; color:#c7d0dc; }
+      .how p { margin: 6px 0; } .how b { color:#c7d0dc; } .how code { color:#8fd6a0; }
+    </style>
   </head>
   <body>
-    <div id="app">
-      <canvas id="scene"></canvas>
-
-      <div id="pip">
-        <span class="pip-label">Wrist cam · J4</span>
-        <span class="rec-badge" id="recBadge" hidden>● REC 0:00</span>
+    <div id="task">Loading…<span class="kind" id="taskKind"></span></div>
+    <div id="wrap">
+      <div id="left">
+        <canvas id="main" width="640" height="460"></canvas>
+        <div id="cams">
+          <div class="cam"><h4>base camera (overhead) — as recorded</h4><canvas id="baseCam" width="300" height="225"></canvas></div>
+          <div class="cam"><h4>wrist camera — as recorded</h4><canvas id="wristCam" width="300" height="225"></canvas></div>
+        </div>
       </div>
-
-      <div id="panel">
-        <h1>xArm 5 Chessboard Sim</h1>
-        <p class="hint">
-          Drag to orbit &middot; scroll/pinch to zoom. Click a piece to pick it up,
-          then click a square to place it. The gripper stays vertical.
-        </p>
-
-        <section>
-          <h2>Joints</h2>
-          <div id="sliders"></div>
-        </section>
-
-        <section>
-          <h2>Target (meters)</h2>
-          <div class="targets">
-            <label>X <input id="tx" type="number" step="0.01" value="0.10" /></label>
-            <label>Y <input id="ty" type="number" step="0.01" value="0.08" /></label>
-            <label>Z <input id="tz" type="number" step="0.01" value="0.15" /></label>
-          </div>
-          <div class="buttons">
-            <button id="move">Move to target</button>
-            <button id="reset" class="secondary">Reset pose</button>
-          </div>
-          <div class="buttons">
-            <button id="home" class="secondary">Home (board view)</button>
-          </div>
-        </section>
-
-        <section>
-          <h2>Status</h2>
-          <div class="readout">
-            <div>End effector: <span id="ee">–</span></div>
-            <div id="solver" class="solver">Idle</div>
-          </div>
-        </section>
-
-        <section>
-          <h2>Wrist camera</h2>
-          <div class="slider-row">
-            <label for="focal">Focal</label>
-            <input id="focal" type="range" min="12" max="85" step="1" value="20" />
-            <span id="focalVal" class="val">20 mm</span>
-          </div>
-          <div class="slider-row">
-            <label for="camAngle" title="Camera mount angle vs the arm axis (calibration)">Angle</label>
-            <input id="camAngle" type="range" min="-30" max="60" step="1" value="17" />
-            <span id="camAngleVal" class="val">17°</span>
-          </div>
-          <div class="cam-row">
-            <label for="recRes">Resolution</label>
-            <select id="recRes">
-              <option value="480">480p</option>
-              <option value="720" selected>720p</option>
-              <option value="1080">1080p</option>
+      <div id="right">
+        <div class="panel">
+          <div class="row">
+            <label>Scenario</label>
+            <select id="scenario">
+              <option value="queen_move">queen_move (board, yaw 0)</option>
+              <option value="queen_move_yaw90">queen_move_yaw90 (board, yaw 90)</option>
+              <option value="table_pickup">table_pickup (bare table, fast)</option>
+              <option value="table_pickup_slow">table_pickup_slow (long, real-duration)</option>
             </select>
           </div>
-          <div class="buttons">
-            <button id="record">● Record</button>
-            <button id="snapshot" class="secondary">Snapshot</button>
+          <div class="row">
+            <label>Seed</label>
+            <input id="seed" type="number" value="11" style="width:90px" />
+            <button id="rand">random</button>
+            <label>Piece set</label>
+            <select id="set"><option value="">(random)</option></select>
+            <button id="gen" class="primary">Generate</button>
           </div>
-        </section>
+          <div class="row">
+            <button id="play">▶ Play</button>
+            <input id="scrub" type="range" min="0" max="1" value="0" />
+          </div>
+          <div class="row kv">
+            <span id="frameLbl">frame 0/0</span> · <span id="timeLbl">0.00s</span> · <span class="phase" id="phaseLbl">—</span>
+          </div>
+          <div class="row toggles">
+            <label><input type="checkbox" id="tWp" checked /> waypoints</label>
+            <label><input type="checkbox" id="tPath" checked /> path</label>
+            <label><input type="checkbox" id="tTcp" checked /> TCP marker</label>
+          </div>
+          <div class="legend hint" id="legend"></div>
+        </div>
 
-        <section>
-          <h2>Board editor</h2>
-          <button id="editToggle" class="secondary toggle">Edit board: Off</button>
-          <div id="editor" hidden>
-            <p class="hint" id="editHint">Pick a tool, then click the board.</p>
-            <div class="tool-grid">
-              <button class="tool active" data-tool="move">Move</button>
-              <button class="tool" data-tool="erase">Erase</button>
-              <button class="tool" data-tool="pawn">Pawn</button>
-              <button class="tool" data-tool="knight">Knight</button>
-              <button class="tool" data-tool="bishop">Bishop</button>
-              <button class="tool" data-tool="rook">Rook</button>
-              <button class="tool" data-tool="queen">Queen</button>
-              <button class="tool" data-tool="king">King</button>
-            </div>
-            <div class="buttons">
-              <button id="colorToggle">Color: White</button>
-              <button id="removeSel" class="secondary" disabled>Remove selected</button>
-            </div>
-            <div class="buttons">
-              <button id="setBoard" class="secondary">Reset to start</button>
-              <button id="clearBoard" class="secondary">Clear board</button>
-            </div>
+        <details open><summary>Current frame — state &amp; action</summary>
+          <pre id="frameInfo"></pre>
+        </details>
+        <details><summary>episode.json</summary><pre id="epJson"></pre></details>
+        <details><summary>manifest.json (all randomized variables)</summary><pre id="manifest"></pre></details>
+        <details><summary>frames.jsonl (first &amp; last few lines)</summary><pre id="framesJsonl"></pre></details>
+        <details><summary>How it works — task → robot actions</summary>
+          <div class="how" style="padding:10px 12px">
+            <p><b>1. Scenario → spec.</b> A <code>(scenario, seed)</code> is resolved into a
+              <b>scene spec</b> (board on/off, which piece, its start square/spot, camera,
+              lighting, floor) and a <b>motion primitive</b> — either a <code>move</code>
+              (grasp A → place B) or a <code>pickup</code> (grasp → lift &amp; hold). The seed
+              drives every random choice, so an episode is fully reproducible.</p>
+            <p><b>2. Motion plan → waypoints.</b> The primitive expands into the measured
+              phase machine: <code>home → approach → descend/grasp → lift → traverse →
+              place → retract</code> (pickups: <code>… → lift high &amp; hold</code>). The
+              colored spheres are those <b>waypoints</b>; the line is the true TCP path.</p>
+            <p><b>3. Inverse kinematics.</b> The path is sampled at the camera rate; each
+              frame the arm solves IK to put the tool tip on the path, kept vertical (J5
+              holds the grip-plane / wrist-camera orientation — that's the yaw 0 vs 90).</p>
+            <p><b>4. Frames.</b> The <b>image</b> is rendered at the true pose every frame
+              (smooth), while the logged <b>state</b> is sample-held (~every 3rd frame) to
+              match the real recorder — see the duplicated rows in frames.jsonl.</p>
+            <p><b>Task types today:</b> <code>queen_move</code> / <code>queen_move_yaw90</code>
+              (white-queen moves on a board, like the bulk of the real data) and
+              <code>table_pickup</code> (pick a non-queen piece off a bare table, held long
+              like the real pickups). Everything you change here is logged in the manifest.</p>
           </div>
-        </section>
+        </details>
       </div>
     </div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/synth/viewer.ts"></script>
   </body>
 </html>

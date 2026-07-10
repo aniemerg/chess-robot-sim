@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>xArm 5 Chessboard Simulator</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <div id="pip">
+        <span class="pip-label">Wrist cam · J4</span>
+        <span class="rec-badge" id="recBadge" hidden>● REC 0:00</span>
+      </div>
+
+      <div id="panel">
+        <h1>xArm 5 Chessboard Sim</h1>
+        <p class="hint">
+          Drag to orbit &middot; scroll/pinch to zoom. Click a piece to pick it up,
+          then click a square to place it. The gripper stays vertical.
+        </p>
+
+        <section>
+          <h2>Joints</h2>
+          <div id="sliders"></div>
+        </section>
+
+        <section>
+          <h2>Target (meters)</h2>
+          <div class="targets">
+            <label>X <input id="tx" type="number" step="0.01" value="0.10" /></label>
+            <label>Y <input id="ty" type="number" step="0.01" value="0.08" /></label>
+            <label>Z <input id="tz" type="number" step="0.01" value="0.15" /></label>
+          </div>
+          <div class="buttons">
+            <button id="move">Move to target</button>
+            <button id="reset" class="secondary">Reset pose</button>
+          </div>
+          <div class="buttons">
+            <button id="home" class="secondary">Home (board view)</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Status</h2>
+          <div class="readout">
+            <div>End effector: <span id="ee">–</span></div>
+            <div id="solver" class="solver">Idle</div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Wrist camera</h2>
+          <div class="slider-row">
+            <label for="focal">Focal</label>
+            <input id="focal" type="range" min="12" max="85" step="1" value="20" />
+            <span id="focalVal" class="val">20 mm</span>
+          </div>
+          <div class="slider-row">
+            <label for="camAngle" title="Camera mount angle vs the arm axis (calibration)">Angle</label>
+            <input id="camAngle" type="range" min="-30" max="60" step="1" value="17" />
+            <span id="camAngleVal" class="val">17°</span>
+          </div>
+          <div class="cam-row">
+            <label for="recRes">Resolution</label>
+            <select id="recRes">
+              <option value="480">480p</option>
+              <option value="720" selected>720p</option>
+              <option value="1080">1080p</option>
+            </select>
+          </div>
+          <div class="buttons">
+            <button id="record">● Record</button>
+            <button id="snapshot" class="secondary">Snapshot</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Board editor</h2>
+          <button id="editToggle" class="secondary toggle">Edit board: Off</button>
+          <div id="editor" hidden>
+            <p class="hint" id="editHint">Pick a tool, then click the board.</p>
+            <div class="tool-grid">
+              <button class="tool active" data-tool="move">Move</button>
+              <button class="tool" data-tool="erase">Erase</button>
+              <button class="tool" data-tool="pawn">Pawn</button>
+              <button class="tool" data-tool="knight">Knight</button>
+              <button class="tool" data-tool="bishop">Bishop</button>
+              <button class="tool" data-tool="rook">Rook</button>
+              <button class="tool" data-tool="queen">Queen</button>
+              <button class="tool" data-tool="king">King</button>
+            </div>
+            <div class="buttons">
+              <button id="colorToggle">Color: White</button>
+              <button id="removeSel" class="secondary" disabled>Remove selected</button>
+            </div>
+            <div class="buttons">
+              <button id="setBoard" class="secondary">Reset to start</button>
+              <button id="clearBoard" class="secondary">Clear board</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

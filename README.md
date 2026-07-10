@@ -74,11 +74,12 @@ Entry points (Vite multi-page; open each at the dev URL):
 
 | Page | Loads | What it is |
 | --- | --- | --- |
-| `xarm5.html` | `src/xarm5/verify.ts` | **Current** arm model viewer / FK-IK verification. |
-| `replay.html` | `src/xarm5/replay.ts` | **Current** replay: drive the arm along a real recorded trajectory, render base+wrist. |
-| `xarm5-calibrate.html` | `src/xarm5/calibrate.ts` | **Current** interactive camera calibration against a real base image. |
-| `index.html` | `src/main.ts` | Legacy interactive simulator (board editor, manual IK, wrist cam). |
-| `calibrate.html` / `export.html` | `src/calibrate.ts` / `src/export.ts` | Legacy replication/calibration tools. |
+| `index.html` (default) | `src/synth/viewer.ts` | **Synthetic scenario viewer** — generate a scenario, orbit/scrub the sim, see base+wrist cams, waypoints, and the episode.json/manifest/frames.jsonl behind it. |
+| `synth.html` | `src/synth/generate.ts` | Headless synth episode (used by the batch writers). |
+| `replay.html` | `src/xarm5/replay.ts` | Replay: drive the arm along a real recorded trajectory, render base+wrist. |
+| `xarm5.html` | `src/xarm5/verify.ts` | Official arm model viewer / FK-IK verification. |
+| `xarm5-calibrate.html` | `src/xarm5/calibrate.ts` | Interactive camera calibration against a real base image. |
+| `legacy.html` | `src/main.ts` | Legacy crude simulator (board editor, manual IK); `calibrate.html`/`export.html` are its old tools. |
 
 ## Reference — the current (xarm5) model
 

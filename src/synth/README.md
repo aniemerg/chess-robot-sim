@@ -33,8 +33,12 @@ one. Output goes to `synth/` (gitignored). A side-by-side `base|wrist` preview
 mp4 is written next to the dataset for eyeballing.
 
 Scenarios (parametric core, plan §3): `queen_move`, `queen_move_yaw90`,
-`table_pickup`. Open `synth.html?scenario=&seed=` in the dev server to inspect
-one interactively. Append `&set=<id>` (or a 6th CLI arg) to force a piece set.
+`table_pickup` (fast: approach → grasp → lift → brief hold), and
+`table_pickup_slow` (the long real-duration variant, ~13–31s, gated separately).
+Pickups place the piece within the chessboard footprint, and the overhead frames
+that footprint (board present or not). Open the **viewer** (`index.html`) to
+generate/scrub any scenario interactively, or `synth.html?scenario=&seed=` for
+the headless page. Append `&set=<id>` (or a 6th CLI arg) to force a piece set.
 
 **Piece models** (`piece_models.ts`): episodes randomly draw one of several
 sets (each logged with its license in the manifest). Three set kinds:
