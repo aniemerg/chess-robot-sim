@@ -1,0 +1,7 @@
+# Eval harness deps (client side — runs on Mac).
+numpy
+requests
+pillow
+# For --policy openpi, also install the openpi client (lightweight, no CUDA):
+#   pip install "openpi-client @ git+https://github.com/Physical-Intelligence/openpi.git#subdirectory=packages/openpi-client"
+# (The π0.5 *server* needs an NVIDIA GPU + Ubuntu — see docs/pi05_integration.md.)

@@ -11,3 +11,9 @@ public/rollouts/
 
 # synthetic dataset output (anchored to repo root; NOT src/synth/)
 /synth/
+
+# eval outputs
+eval/results.json
+eval/rollouts/
+__pycache__/
+*.pyc

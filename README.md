@@ -76,6 +76,7 @@ Entry points (Vite multi-page; open each at the dev URL):
 | --- | --- | --- |
 | `index.html` (default) | `src/synth/viewer.ts` | **Synthetic scenario viewer** — generate a scenario, orbit/scrub the sim, see base+wrist cams, waypoints, and the episode.json/manifest/frames.jsonl behind it. |
 | `synth.html` | `src/synth/generate.ts` | Headless synth episode (used by the batch writers). |
+| `env.html` | `src/synth/env.ts` | Closed-loop policy env (reset/step/success) — driven by `tools/sim-server.mjs` for the π0.5 eval (`eval/`, see `docs/pi05_integration.md`). |
 | `replay.html` | `src/xarm5/replay.ts` | Replay: drive the arm along a real recorded trajectory, render base+wrist. |
 | `xarm5.html` | `src/xarm5/verify.ts` | Official arm model viewer / FK-IK verification. |
 | `xarm5-calibrate.html` | `src/xarm5/calibrate.ts` | Interactive camera calibration against a real base image. |
